@@ -16,7 +16,9 @@
     "@mui/x-charts": "^8.7.0",
     "@mui/x-data-grid": "^8.7.0",
     "axios": "^1.6.0",
+    "csv-parser": "^3.2.0",
     "next": "14.0.3",
+    "papaparse": "^5.5.3",
     "react": "^18",
     "react-dom": "^18"
   },

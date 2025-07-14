@@ -50,6 +50,7 @@ export default function Dashboard() {
     { title: 'Performance', value: 94, change: 5.3, trend: 'up', icon: <Assessment />, color: '#8b5cf6' },
   ]);
 
+// Fetch data and simulate live updates
   useEffect(() => {
     const fetchData = async () => {
       try {

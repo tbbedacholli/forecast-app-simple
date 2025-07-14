@@ -19,10 +19,10 @@ import {
   TrendingUp as ForecastIcon,
   Analytics as AnalyticsIcon,
   Settings as SettingsIcon,
-  TrendingUp,
   ChevronLeft,
   ChevronRight,
-  Menu
+  Menu,
+  AutoFixHigh as AutoFixHighIcon
 } from '@mui/icons-material';
 import Link from 'next/link';
 
@@ -31,6 +31,7 @@ const collapsedWidth = 64;
 
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, href: '/' },
+  { text: 'Forecast Wizard', icon: <AutoFixHighIcon />, href: '/wizard' },
   { text: 'Forecast', icon: <ForecastIcon />, href: '/forecast' },
   { text: 'Analytics', icon: <AnalyticsIcon />, href: '/analytics' },
   { text: 'Settings', icon: <SettingsIcon />, href: '/settings' },
@@ -62,14 +63,14 @@ export default function Sidebar({ isCollapsed, onToggle }) {
       }}>
         {!isCollapsed && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <TrendingUp sx={{ color: '#3b82f6' }} />
+            <ForecastIcon sx={{ color: '#3b82f6' }} />
             <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'white' }}>
               ForecastPro
             </Typography>
           </Box>
         )}
         {isCollapsed && (
-          <TrendingUp sx={{ color: '#3b82f6' }} />
+          <ForecastIcon sx={{ color: '#3b82f6' }} />
         )}
         <IconButton 
           onClick={onToggle}

@@ -93,3 +93,7 @@ jspm_packages/
 
 # DynamoDB Local files
 .dynamodb/
+
+# Add this to your .gitignore
+uploads/*
+!uploads/.gitkeep
