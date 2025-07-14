@@ -1,6 +1,6 @@
 // components/ForecastWizard/FileUpload.js
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -21,8 +21,16 @@ export default function FileUpload({ data, onUpdate, onNext, setError, setLoadin
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  useEffect(() => {
+    console.log('🌍 Environment:', process.env.NODE_ENV);
+    console.log('🔗 Base URL:', window.location.origin);
+    console.log('📡 API URL:', '/api/wizard/upload');
+  }, []);
+
   const handleFileUpload = async (file) => {
     if (!file) return;
+
+    console.log('📁 Uploading file:', file.name, 'Size:', file.size);
 
     // Validate file type
     if (!file.name.endsWith('.csv')) {
@@ -30,23 +38,63 @@ export default function FileUpload({ data, onUpdate, onNext, setError, setLoadin
       return;
     }
 
+    // Check if file is actually readable
+    try {
+      const testRead = await file.text();
+      if (!testRead.trim()) {
+        setError('File appears to be empty');
+        return;
+      }
+    } catch (err) {
+      setError('Unable to read file: ' + err.message);
+      return;
+    }
+
+    const uploadWithRetry = async (retries = 3) => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+
+          console.log(`📤 Upload attempt ${i + 1}/${retries}`);
+          
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+          const response = await fetch('/api/wizard/upload', {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          const result = await response.json();
+
+          if (!response.ok) {
+            throw new Error(result.error || `HTTP error! status: ${response.status}`);
+          }
+
+          return result;
+
+        } catch (error) {
+          console.error(`💥 Upload attempt ${i + 1} failed:`, error);
+          
+          if (i === retries - 1) {
+            throw error;
+          }
+          
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+        }
+      }
+    };
+
     setUploading(true);
     setError('');
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/wizard/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('Upload failed');
-      }
-
-      const result = await response.json();
+      const result = await uploadWithRetry();
       
       onUpdate({
         file: file,
@@ -55,8 +103,15 @@ export default function FileUpload({ data, onUpdate, onNext, setError, setLoadin
         totalRows: result.totalRows
       });
 
+      setError('');
     } catch (error) {
-      setError('Error uploading file: ' + error.message);
+      console.error('💥 Final upload error:', error);
+      
+      if (error.name === 'AbortError') {
+        setError('Upload timeout - please try again');
+      } else {
+        setError(`Upload failed: ${error.message}`);
+      }
     } finally {
       setUploading(false);
     }
