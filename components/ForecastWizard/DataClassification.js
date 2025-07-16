@@ -8,6 +8,12 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Grid,
+  Button,
+  Alert,
+  Card,
+  CardContent,
+  Chip,
   Table,
   TableBody,
   TableCell,
@@ -15,103 +21,145 @@ import {
   TableHead,
   TableRow,
   Paper,
-  Button,
-  Chip,
-  CircularProgress
+  IconButton,
+  Tooltip
 } from '@mui/material';
+import { 
+  AutoFixHigh,
+  Info,
+  CheckCircle,
+  Warning,
+  Error
+} from '@mui/icons-material';
+
+const DATA_TYPES = [
+  { value: 'numeric', label: 'Numeric (continuous values)', color: 'success' },
+  { value: 'categorical', label: 'Categorical (discrete categories)', color: 'secondary' },
+  { value: 'binary', label: 'Binary (0/1, Yes/No)', color: 'warning' },
+  { value: 'date', label: 'Date/Time', color: 'info' },
+  { value: 'text', label: 'Text/String', color: 'default' }
+];
 
 export default function DataClassification({ data, onUpdate, onNext, onBack, setError }) {
-  const [classification, setClassification] = useState(data.dataClassification || {});
-  const [loading, setLoading] = useState(false);
+  const [dataClassification, setDataClassification] = useState({});
+  const [autoClassified, setAutoClassified] = useState(new Set());
 
+  // Initialize data classification from upload validation results
   useEffect(() => {
-    // Auto-classify columns based on data types
-    autoClassifyColumns();
-  }, []);
-
-  const autoClassifyColumns = async () => {
-    if (!data.columns || !data.previewData) return;
-
-    setLoading(true);
-    try {
-      // Simple client-side classification
-      const newClassification = {};
+    if (data.validation?.columnAnalysis && Object.keys(dataClassification).length === 0) {
+      const initialClassification = {};
+      const autoClassifiedColumns = new Set();
       
-      data.columns.forEach(column => {
-        // Skip selected columns
-        if (column === data.selectedColumns?.target || 
-            column === data.selectedColumns?.date || 
-            column === data.selectedColumns?.level) {
-          return;
-        }
-
-        // Sample values for classification
-        const sampleValues = data.previewData
-          .map(row => row[column])
-          .filter(val => val != null && val !== '');
-        
-        if (sampleValues.length === 0) {
-          newClassification[column] = 'categorical';
-          return;
-        }
-        
-        // Check if numeric
-        const numericValues = sampleValues.filter(val => {
-          const num = parseFloat(val);
-          return !isNaN(num) && isFinite(num);
-        });
-        
-        if (numericValues.length / sampleValues.length > 0.8) {
-          newClassification[column] = 'numeric';
-        } else {
-          newClassification[column] = 'categorical';
-        }
+      // Pre-populate with detected types from upload validation
+      Object.entries(data.validation.columnAnalysis).forEach(([columnName, analysis]) => {
+        initialClassification[columnName] = analysis.type;
+        autoClassifiedColumns.add(columnName);
       });
-
-      setClassification(newClassification);
-      onUpdate({ dataClassification: newClassification });
-    } catch (error) {
-      console.error('Auto-classification error:', error);
-      setError('Failed to classify columns automatically');
-    } finally {
-      setLoading(false);
+      
+      setDataClassification(initialClassification);
+      setAutoClassified(autoClassifiedColumns);
+      
+      // Update parent component
+      onUpdate({ 
+        dataClassification: initialClassification,
+        autoClassified: autoClassifiedColumns
+      });
     }
-  };
+  }, [data.validation, onUpdate]);
 
-  const handleClassificationChange = (column, type) => {
-    const newClassification = { ...classification, [column]: type };
-    setClassification(newClassification);
-    onUpdate({ dataClassification: newClassification });
-  };
-
-  const getOtherColumns = () => {
-    const { target, date, level } = data.selectedColumns || {};
-    const levelColumns = Array.isArray(level) ? level : (level ? [level] : []);
+  const handleTypeChange = (column, newType) => {
+    const updated = { ...dataClassification, [column]: newType };
+    setDataClassification(updated);
     
-    return data.columns?.filter(col => 
-      col !== target && 
-      col !== date && 
-      !levelColumns.includes(col)
-    ) || [];
+    // Remove from auto-classified if user manually changed it
+    const newAutoClassified = new Set(autoClassified);
+    newAutoClassified.delete(column);
+    setAutoClassified(newAutoClassified);
+    
+    onUpdate({ 
+      dataClassification: updated,
+      autoClassified: newAutoClassified
+    });
+  };
+
+  const handleAutoClassify = () => {
+    if (!data.validation?.columnAnalysis) {
+      setError('No validation data available for auto-classification');
+      return;
+    }
+
+    const autoClassification = {};
+    const newAutoClassified = new Set();
+    
+    Object.entries(data.validation.columnAnalysis).forEach(([columnName, analysis]) => {
+      autoClassification[columnName] = analysis.type;
+      newAutoClassified.add(columnName);
+    });
+    
+    setDataClassification(autoClassification);
+    setAutoClassified(newAutoClassified);
+    
+    onUpdate({ 
+      dataClassification: autoClassification,
+      autoClassified: newAutoClassified
+    });
   };
 
   const getTypeColor = (type) => {
-    switch (type) {
-      case 'numeric': return 'primary';
-      case 'categorical': return 'secondary';
-      case 'datetime': return 'warning';
-      default: return 'default';
+    const typeInfo = DATA_TYPES.find(t => t.value === type);
+    return typeInfo ? typeInfo.color : 'default';
+  };
+
+  const getValidationInfo = (column) => {
+    const analysis = data.validation?.columnAnalysis[column];
+    if (!analysis) return null;
+
+    return {
+      issues: analysis.issues || [],
+      warnings: analysis.warnings || [],
+      suggestions: analysis.suggestions || [],
+      confidence: analysis.confidence || 0.8
+    };
+  };
+
+  const getConfidenceIcon = (column) => {
+    const validation = getValidationInfo(column);
+    if (!validation) return null;
+
+    if (validation.issues.length > 0) {
+      return <Error color="error" fontSize="small" />;
+    } else if (validation.warnings.length > 0) {
+      return <Warning color="warning" fontSize="small" />;
+    } else {
+      return <CheckCircle color="success" fontSize="small" />;
     }
   };
 
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
-        <CircularProgress />
-        <Typography sx={{ ml: 2 }}>Analyzing data types...</Typography>
-      </Box>
-    );
-  }
+  const validateClassification = () => {
+    const missingColumns = data.columns.filter(col => !dataClassification[col]);
+    
+    if (missingColumns.length > 0) {
+      setError(`Please classify all columns: ${missingColumns.join(', ')}`);
+      return false;
+    }
+    
+    setError('');
+    return true;
+  };
+
+  const handleNext = () => {
+    if (validateClassification()) {
+      onNext();
+    }
+  };
+
+  const getClassificationSummary = () => {
+    const summary = {};
+    Object.values(dataClassification).forEach(type => {
+      summary[type] = (summary[type] || 0) + 1;
+    });
+    return summary;
+  };
 
   return (
     <Box>
@@ -119,162 +167,298 @@ export default function DataClassification({ data, onUpdate, onNext, onBack, set
         Step 3: Data Classification
       </Typography>
 
-      <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
-        Review and adjust the automatic classification of your columns. This helps the model understand your data better.
-      </Typography>
+      <Alert severity="info" sx={{ mb: 3 }}>
+        <Typography variant="body2">
+          <strong>Data types have been automatically detected</strong> based on your upload validation.
+          <br />
+          Review and adjust the classifications below if needed. Auto-classified columns are marked with 
+          <AutoFixHigh fontSize="small" sx={{ mx: 0.5 }} /> icon.
+        </Typography>
+      </Alert>
 
-      <TableContainer component={Paper}>
+      {/* Classification Summary */}
+      {Object.keys(dataClassification).length > 0 && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ mb: 2 }}>Classification Summary</Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {Object.entries(getClassificationSummary()).map(([type, count]) => (
+                <Chip
+                  key={type}
+                  label={`${type}: ${count}`}
+                  color={getTypeColor(type)}
+                  variant="outlined"
+                />
+              ))}
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Auto-classify Button */}
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
+        <Button
+          variant="outlined"
+          startIcon={<AutoFixHigh />}
+          onClick={handleAutoClassify}
+          disabled={!data.validation?.columnAnalysis}
+        >
+          Re-run Auto Classification
+        </Button>
+      </Box>
+
+      {/* Column Classification Table */}
+      <TableContainer component={Paper} sx={{ mb: 3 }}>
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Column Name</TableCell>
-              <TableCell>Sample Values</TableCell>
-              <TableCell>Data Type</TableCell>
-              <TableCell>Role</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Column Name</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Sample Values</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Data Type</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Confidence</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Info</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {/* Target Column */}
-            {data.selectedColumns?.target && (
-              <TableRow sx={{ bgcolor: '#e3f2fd' }}>
-                <TableCell sx={{ fontWeight: 600 }}>
-                  {data.selectedColumns.target}
-                </TableCell>
-                <TableCell>
-                  {data.previewData?.slice(0, 3).map((row, i) => (
-                    <span key={i}>
-                      {row[data.selectedColumns.target]}
-                      {i < 2 ? ', ' : ''}
-                    </span>
-                  ))}
-                </TableCell>
-                <TableCell>
-                  <Chip 
-                    label="Numeric" 
-                    color="primary" 
-                    size="small" 
-                  />
-                </TableCell>
-                <TableCell>
-                  <Chip 
-                    label="Target" 
-                    color="success" 
-                    size="small" 
-                  />
-                </TableCell>
-              </TableRow>
-            )}
-
-            {/* Date Column */}
-            {data.selectedColumns?.date && (
-              <TableRow sx={{ bgcolor: '#fff3e0' }}>
-                <TableCell sx={{ fontWeight: 600 }}>
-                  {data.selectedColumns.date}
-                </TableCell>
-                <TableCell>
-                  {data.previewData?.slice(0, 3).map((row, i) => (
-                    <span key={i}>
-                      {row[data.selectedColumns.date]}
-                      {i < 2 ? ', ' : ''}
-                    </span>
-                  ))}
-                </TableCell>
-                <TableCell>
-                  <Chip 
-                    label="DateTime" 
-                    color="warning" 
-                    size="small" 
-                  />
-                </TableCell>
-                <TableCell>
-                  <Chip 
-                    label="Date" 
-                    color="info" 
-                    size="small" 
-                  />
-                </TableCell>
-              </TableRow>
-            )}
-
-            {/* Level Columns */}
-            {data.selectedColumns?.level && Array.isArray(data.selectedColumns.level) && data.selectedColumns.level.length > 0 && (
-              <>
-                {data.selectedColumns.level.map((levelCol, index) => (
-                  <TableRow key={`level-${index}`} sx={{ bgcolor: '#f3e5f5' }}>
-                    <TableCell sx={{ fontWeight: 600 }}>
-                      {levelCol}
-                    </TableCell>
-                    <TableCell>
-                      {data.previewData?.slice(0, 3).map((row, i) => (
-                        <span key={i}>
-                          {row[levelCol]}
-                          {i < 2 ? ', ' : ''}
-                        </span>
-                      ))}
-                    </TableCell>
-                    <TableCell>
-                      <Chip 
-                        label="Categorical" 
-                        color="secondary" 
-                        size="small" 
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Chip 
-                        label="Level" 
-                        color="warning" 
-                        size="small" 
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </>
-            )}
-
-            {/* Other Columns */}
-            {getOtherColumns().map((column) => (
-              <TableRow key={column}>
-                <TableCell sx={{ fontWeight: 500 }}>
-                  {column}
-                </TableCell>
-                <TableCell>
-                  {data.previewData?.slice(0, 3).map((row, i) => (
-                    <span key={i}>
-                      {row[column]}
-                      {i < 2 ? ', ' : ''}
-                    </span>
-                  ))}
-                </TableCell>
-                <TableCell>
-                  <FormControl size="small" sx={{ minWidth: 120 }}>
-                    <Select
-                      value={classification[column] || 'numeric'}
-                      onChange={(e) => handleClassificationChange(column, e.target.value)}
-                    >
-                      <MenuItem value="numeric">Numeric</MenuItem>
-                      <MenuItem value="categorical">Categorical</MenuItem>
-                      <MenuItem value="datetime">DateTime</MenuItem>
-                    </Select>
-                  </FormControl>
-                </TableCell>
-                <TableCell>
-                  <Chip 
-                    label="Feature" 
-                    color={getTypeColor(classification[column])} 
-                    size="small" 
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
+            {data.columns.map((column) => {
+              const validation = getValidationInfo(column);
+              const analysis = data.validation?.columnAnalysis[column];
+              
+              return (
+                <TableRow key={column}>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {column}
+                      {autoClassified.has(column) && (
+                        <Tooltip title="Auto-classified">
+                          <AutoFixHigh color="primary" fontSize="small" />
+                        </Tooltip>
+                      )}
+                    </Box>
+                  </TableCell>
+                  
+                  <TableCell>
+                    <Typography variant="body2" color="textSecondary">
+                      {analysis?.samples?.join(', ') || 'N/A'}
+                    </Typography>
+                  </TableCell>
+                  
+                  <TableCell>
+                    <FormControl size="small" sx={{ minWidth: 200 }}>
+                      <Select
+                        value={dataClassification[column] || ''}
+                        onChange={(e) => handleTypeChange(column, e.target.value)}
+                        displayEmpty
+                      >
+                        <MenuItem value="" disabled>
+                          Select type
+                        </MenuItem>
+                        {DATA_TYPES.map((type) => (
+                          <MenuItem key={type.value} value={type.value}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Chip
+                                label={type.value}
+                                size="small"
+                                color={type.color}
+                              />
+                              {type.label}
+                            </Box>
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </TableCell>
+                  
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {getConfidenceIcon(column)}
+                      <Typography variant="body2">
+                        {validation?.confidence ? `${(validation.confidence * 100).toFixed(0)}%` : 'N/A'}
+                      </Typography>
+                    </Box>
+                  </TableCell>
+                  
+                  <TableCell>
+                    {validation && (validation.issues.length > 0 || validation.warnings.length > 0 || validation.suggestions.length > 0) && (
+                      <Tooltip
+                        title={
+                          <Box sx={{ maxWidth: 400 }}>
+                            {validation.issues.length > 0 && (
+                              <Box sx={{ mb: 1.5 }}>
+                                <Typography variant="body2" sx={{ 
+                                  fontWeight: 600, 
+                                  color: '#d32f2f', // Dark red text
+                                  mb: 0.5,
+                                  bgcolor: '#ffebee', // Light red background
+                                  px: 1,
+                                  py: 0.5,
+                                  borderRadius: 1,
+                                  fontSize: '0.75rem'
+                                }}>
+                                  🚨 ISSUES
+                                </Typography>
+                                {validation.issues.map((issue, idx) => (
+                                  <Typography key={idx} variant="body2" sx={{ 
+                                    color: '#d32f2f', // Dark red text
+                                    mb: 0.5,
+                                    pl: 1,
+                                    fontSize: '0.8rem',
+                                    lineHeight: 1.3
+                                  }}>
+                                    • {issue}
+                                  </Typography>
+                                ))}
+                              </Box>
+                            )}
+                            
+                            {validation.warnings.length > 0 && (
+                              <Box sx={{ mb: 1.5 }}>
+                                <Typography variant="body2" sx={{ 
+                                  fontWeight: 600, 
+                                  color: '#ed6c02', // Dark orange text
+                                  mb: 0.5,
+                                  bgcolor: '#fff3e0', // Light orange background
+                                  px: 1,
+                                  py: 0.5,
+                                  borderRadius: 1,
+                                  fontSize: '0.75rem'
+                                }}>
+                                  ⚠️ WARNINGS
+                                </Typography>
+                                {validation.warnings.map((warning, idx) => (
+                                  <Typography key={idx} variant="body2" sx={{ 
+                                    color: '#ed6c02', // Dark orange text
+                                    mb: 0.5,
+                                    pl: 1,
+                                    fontSize: '0.8rem',
+                                    lineHeight: 1.3
+                                  }}>
+                                    • {warning}
+                                  </Typography>
+                                ))}
+                              </Box>
+                            )}
+                            
+                            {validation.suggestions.length > 0 && (
+                              <Box>
+                                <Typography variant="body2" sx={{ 
+                                  fontWeight: 600, 
+                                  color: '#0288d1', // Dark blue text
+                                  mb: 0.5,
+                                  bgcolor: '#e3f2fd', // Light blue background
+                                  px: 1,
+                                  py: 0.5,
+                                  borderRadius: 1,
+                                  fontSize: '0.75rem'
+                                }}>
+                                  💡 SUGGESTIONS
+                                </Typography>
+                                {validation.suggestions.map((suggestion, idx) => (
+                                  <Typography key={idx} variant="body2" sx={{ 
+                                    color: '#0288d1', // Dark blue text
+                                    mb: 0.5,
+                                    pl: 1,
+                                    fontSize: '0.8rem',
+                                    lineHeight: 1.3
+                                  }}>
+                                    • {suggestion}
+                                  </Typography>
+                                ))}
+                              </Box>
+                            )}
+                          </Box>
+                        }
+                        arrow
+                        placement="top"
+                        componentsProps={{
+                          tooltip: {
+                            sx: {
+                              bgcolor: '#f5f5f5', // Light gray background
+                              border: '1px solid #ddd',
+                              borderRadius: 2,
+                              boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+                              maxWidth: 450,
+                              p: 2,
+                              color: '#333' // Dark text for better contrast
+                            }
+                          },
+                          arrow: {
+                            sx: {
+                              color: '#f5f5f5' // Match the tooltip background
+                            }
+                          }
+                        }}
+                      >
+                        <IconButton size="small" sx={{ 
+                          color: '#666',
+                          '&:hover': {
+                            bgcolor: 'rgba(0,0,0,0.04)',
+                            color: '#333'
+                          }
+                        }}>
+                          <Info fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* Data Preview with Types */}
+      {data.previewData && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            Data Preview with Classifications
+          </Typography>
+          <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
+            <Table stickyHeader size="small">
+              <TableHead>
+                <TableRow>
+                  {data.columns.map((column) => (
+                    <TableCell key={column} sx={{ fontWeight: 600 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                        <Typography variant="body2">{column}</Typography>
+                        {dataClassification[column] && (
+                          <Chip
+                            label={dataClassification[column]}
+                            size="small"
+                            color={getTypeColor(dataClassification[column])}
+                          />
+                        )}
+                      </Box>
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {data.previewData.slice(0, 5).map((row, index) => (
+                  <TableRow key={index}>
+                    {data.columns.map((column) => (
+                      <TableCell key={column}>
+                        {row[column]}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      )}
 
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 4 }}>
         <Button onClick={onBack}>
           Back
         </Button>
-        <Button variant="contained" onClick={onNext}>
+        <Button
+          variant="contained"
+          onClick={handleNext}
+          disabled={Object.keys(dataClassification).length !== data.columns.length}
+        >
           Next: Feature Classification
         </Button>
       </Box>

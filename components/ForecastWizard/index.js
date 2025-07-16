@@ -36,11 +36,13 @@ export default function ForecastWizard() {
     selectedColumns: {
       target: '',
       date: '',
-      level: [], // ← Ensure this is initialized as an empty array
+      level: [],
       frequency: 'D',
       horizon: 30
     },
-    dataClassification: {},
+    validation: null,
+    dataClassification: {}, // ← Store the classification results
+    autoClassified: new Set(), // ← Track auto-classified columns
     featureClassification: {
       entityProperties: [],
       dynamicFeatures: [],
@@ -77,6 +79,7 @@ export default function ForecastWizard() {
         frequency: 'D',
         horizon: 30
       },
+      validation: null, // ← Add this to store validation results
       dataClassification: {},
       featureClassification: {
         entityProperties: [],
