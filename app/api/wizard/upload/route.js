@@ -1,23 +1,35 @@
-// app/api/upload/route.js
+// app/api/wizard/upload/route.js
 import { NextResponse } from 'next/server';
-import { uploadToS3 } from '../../../utils/s3Storage';
+import Papa from 'papaparse';
+
+// Import with error handling
+let uploadToS3;
+try {
+  const s3Module = await import('../../../../utils/s3Storage');
+  uploadToS3 = s3Module.uploadToS3;
+} catch (error) {
+  console.error('Failed to import S3 storage:', error);
+  uploadToS3 = null;
+}
+
+function generateFilePath(prefix, filename) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `${prefix}/${timestamp}-${filename}`;
+}
+
+async function uploadFileToS3(buffer, key, contentType, metadata = {}) {
+  if (!uploadToS3) {
+    throw new Error('S3 upload functionality not available');
+  }
+  return await uploadToS3(key, buffer, contentType);
+}
 
 export async function POST(request) {
   try {
     console.log('🔄 Upload API called');
     
-    // Check if request has form data
-    if (!request.formData) {
-      console.error('❌ No formData method available');
-      return NextResponse.json({ error: 'Invalid request format' }, { status: 400 });
-    }
-
-    console.log('📋 Getting form data...');
     const data = await request.formData();
-    console.log('📋 Form data received');
-    
     const file = data.get('file');
-    console.log('📁 File from form:', file ? `${file.name} (${file.size} bytes)` : 'No file');
 
     if (!file) {
       console.error('❌ No file in form data');
@@ -31,7 +43,7 @@ export async function POST(request) {
     }
 
     // Check file size (100MB = 104,857,600 bytes)
-    const maxSize = 100 * 1024 * 1024; // 100MB
+    const maxSize = 100 * 1024 * 1024;
     if (file.size > maxSize) {
       return NextResponse.json(
         { error: `File size exceeds 100MB limit. Current size: ${(file.size / 1024 / 1024).toFixed(2)}MB` },
@@ -45,9 +57,6 @@ export async function POST(request) {
     const bytes = await file.arrayBuffer();
     const csvContent = new TextDecoder().decode(bytes);
     
-    console.log('📝 CSV content length:', csvContent.length);
-    console.log('📝 First 100 chars:', csvContent.substring(0, 100));
-
     if (!csvContent.trim()) {
       console.error('❌ Empty CSV content');
       return NextResponse.json({ error: 'CSV file is empty' }, { status: 400 });
@@ -58,82 +67,51 @@ export async function POST(request) {
     const parseResult = Papa.parse(csvContent, {
       header: true,
       skipEmptyLines: true,
-      dynamicTyping: false, // Keep as strings for validation
-      worker: false, // Disable worker for server-side
-      chunk: undefined, // Process all at once
-      fastMode: false, // Use complete parsing for accuracy
-      delimiter: '', // Auto-detect delimiter
-      newline: '', // Auto-detect line endings
-      quoteChar: '"',
-      escapeChar: '"',
+      dynamicTyping: false,
       transformHeader: (header) => {
-        // Clean header names
         return header.trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
       }
     });
 
-    console.log('📊 Parse result:', {
-      rowCount: parseResult.data?.length || 0,
-      errorCount: parseResult.errors?.length || 0,
-      fields: parseResult.meta?.fields || []
-    });
-
-    if (parseResult.errors && parseResult.errors.length > 0) {
-      console.error('❌ CSV parsing errors:', parseResult.errors);
-      // Only fail if there are fatal errors
-      const fatalErrors = parseResult.errors.filter(error => error.type === 'Delimiter');
-      if (fatalErrors.length > 0) {
-        return NextResponse.json(
-          { error: `CSV parsing failed: ${fatalErrors[0].message}` },
-          { status: 400 }
-        );
-      }
-    }
-
-    const { data: rows, meta } = parseResult;
+    const { data: rows } = parseResult;
     
     if (!rows || rows.length === 0) {
       console.error('❌ No rows parsed from CSV');
       return NextResponse.json({ error: 'CSV file contains no data rows' }, { status: 400 });
     }
 
-    // Upload original file to S3
-    console.log('📤 Uploading original file to S3...');
-    const s3Path = generateFilePath('inputs/raw', file.name);
-    
-    const uploadResult = await uploadFileToS3(
-      Buffer.from(bytes),
-      s3Path,
-      'text/csv',
-      {
-        originalName: file.name,
-        fileSize: file.size.toString(),
-        uploadType: 'raw_input',
-        rowCount: rows.length.toString(),
-        columnCount: Object.keys(rows[0]).length.toString()
+    // Try to upload to S3, but don't fail if S3 is unavailable
+    let s3Info = null;
+    try {
+      if (uploadToS3) {
+        console.log('📤 Uploading to S3...');
+        const s3Path = generateFilePath('inputs/raw', file.name);
+        const uploadResult = await uploadFileToS3(Buffer.from(bytes), s3Path, 'text/csv');
+        
+        if (uploadResult.success) {
+          console.log(`✅ File uploaded to S3: ${uploadResult.key}`);
+          s3Info = {
+            bucket: process.env.AWS_S3_BUCKET_NAME,
+            key: uploadResult.key,
+            url: uploadResult.url
+          };
+        }
       }
-    );
+    } catch (s3Error) {
+      console.warn('⚠️ S3 upload failed, continuing without S3:', s3Error.message);
+    }
 
-    console.log(`✅ File uploaded to S3: ${uploadResult.key}`);
-
-    // Get column names
     const columns = Object.keys(rows[0]);
     
-    console.log(`✅ Successfully parsed: ${rows.length} rows, ${columns.length} columns`);
-
     return NextResponse.json({
       success: true,
-      preview: rows.slice(0, 10), // First 10 rows for preview
-      data: rows, // Full dataset for processing
+      preview: rows.slice(0, 10),
+      data: rows,
       columns: columns,
       totalRows: rows.length,
       fileSize: file.size,
       fileName: file.name,
-      s3Info: {
-        bucket: process.env.AWS_S3_BUCKET_NAME,
-        key: uploadResult.key,
-        url: uploadResult.url
-      }
+      s3Info: s3Info
     });
 
   } catch (error) {
@@ -145,7 +123,6 @@ export async function POST(request) {
   }
 }
 
-// Add GET handler if needed
 export async function GET() {
   return NextResponse.json({ message: 'Upload endpoint ready' });
 }

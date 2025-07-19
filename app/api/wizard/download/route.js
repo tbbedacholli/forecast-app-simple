@@ -1,71 +1,76 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateDownloadUrl, uploadCSVToS3, uploadJSONToS3, generateFilePath } from '../../../../utils/s3Storage';
+import { uploadToS3, generateFilePath } from '../../../../utils/s3Storage';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 export async function POST(request) {
   try {
-    console.log('📤 Download API called');
+    console.log('🔄 Download API called');
     
-    const body = await request.json();
-    const { type, data, fileName, metadata = {} } = body;
+    const { type, data, fileName, metadata } = await request.json();
 
-    console.log(`📤 Processing ${type} file: ${fileName}`);
-
-    if (!type || !data || !fileName) {
-      return NextResponse.json(
-        { error: 'Missing required fields: type, data, fileName' },
-        { status: 400 }
-      );
+    if (!data || !fileName) {
+      return NextResponse.json({ error: 'Missing data or fileName' }, { status: 400 });
     }
 
-    let uploadResult;
-    let s3Path;
+    // Generate S3 path based on file type
+    let s3Prefix;
+    let contentType;
+    let fileContent;
 
     switch (type) {
       case 'csv':
-        s3Path = generateFilePath('outputs/processed', fileName);
-        console.log(`📄 Uploading CSV to: ${s3Path}`);
-        uploadResult = await uploadCSVToS3(data, s3Path, {
-          outputType: 'processed_csv',
-          generatedAt: new Date().toISOString(),
-          ...metadata
-        });
+        s3Prefix = 'outputs/processed';
+        contentType = 'text/csv';
+        fileContent = typeof data === 'string' ? data : JSON.stringify(data);
         break;
-
+      
       case 'config':
-        s3Path = generateFilePath('outputs/config', fileName);
-        console.log(`⚙️ Uploading Config to: ${s3Path}`);
-        uploadResult = await uploadJSONToS3(data, s3Path, {
-          outputType: 'config_json',
-          generatedAt: new Date().toISOString(),
-          ...metadata
-        });
+        s3Prefix = 'outputs/configs';
+        contentType = 'application/json';
+        fileContent = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
         break;
-
+      
       default:
-        return NextResponse.json(
-          { error: 'Invalid file type. Supported: csv, config' },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: 'Invalid file type' }, { status: 400 });
     }
 
-    // Generate presigned URL for immediate download
-    const downloadUrl = await generateDownloadUrl(uploadResult.key, 3600); // 1 hour expiry
+    console.log(`📤 Processing ${type} file: ${fileName}`);
+
+    // Generate S3 key
+    const s3Key = generateFilePath(s3Prefix, fileName);
+    
+    // Convert content to buffer
+    const buffer = Buffer.from(fileContent, 'utf-8');
+    
+    // Upload to S3
+    const uploadResult = await uploadToS3(s3Key, buffer, contentType);
+    
+    if (!uploadResult.success) {
+      throw new Error(uploadResult.error || 'S3 upload failed');
+    }
 
     console.log(`✅ File uploaded to S3: ${uploadResult.key}`);
 
+    // Generate download URL (this could be a signed URL or direct link)
+    const downloadUrl = uploadResult.url;
+
     return NextResponse.json({
       success: true,
+      downloadUrl: downloadUrl,
       s3Info: {
         bucket: process.env.AWS_S3_BUCKET_NAME,
         key: uploadResult.key,
-        url: uploadResult.url
+        url: uploadResult.url,
+        contentType: contentType,
+        size: buffer.length
       },
-      downloadUrl,
-      fileName,
-      type
+      metadata: {
+        ...metadata,
+        uploadedAt: new Date().toISOString(),
+        fileType: type
+      }
     });
 
   } catch (error) {
@@ -77,30 +82,6 @@ export async function POST(request) {
   }
 }
 
-export async function GET(request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const key = searchParams.get('key');
-
-    if (!key) {
-      return NextResponse.json(
-        { error: 'Missing S3 key parameter' },
-        { status: 400 }
-      );
-    }
-
-    const downloadUrl = await generateDownloadUrl(key, 3600);
-
-    return NextResponse.json({
-      downloadUrl,
-      key
-    });
-
-  } catch (error) {
-    console.error('❌ Get download URL error:', error);
-    return NextResponse.json(
-      { error: `Failed to generate download URL: ${error.message}` },
-      { status: 500 }
-    );
-  }
+export async function GET() {
+  return NextResponse.json({ message: 'Download endpoint ready' });
 }

@@ -1,7 +1,6 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-// Initialize S3 client
 const s3Client = new S3Client({
   region: process.env.AWS_REGION || 'us-east-1',
   credentials: {
@@ -10,102 +9,82 @@ const s3Client = new S3Client({
   },
 });
 
-const BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME;
+// Add the missing generateFilePath function
+export function generateFilePath(prefix, filename) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const sanitizedFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `${prefix}/${timestamp}-${sanitizedFilename}`;
+}
 
-// Generate unique file path
-export const generateFilePath = (prefix, originalFileName, suffix = '') => {
-  const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-  const randomId = Math.random().toString(36).substring(2, 8);
-  const baseName = originalFileName.replace(/\.[^/.]+$/, '');
-  const extension = originalFileName.split('.').pop();
-  
-  return `${prefix}/${timestamp}_${randomId}/${baseName}${suffix}.${extension}`;
-};
+export async function uploadToS3(key, body, contentType = 'application/octet-stream') {
+  const command = new PutObjectCommand({
+    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+  });
 
-// Upload file to S3
-export const uploadFileToS3 = async (fileBuffer, fileName, contentType, metadata = {}) => {
   try {
-    const command = new PutObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: fileName,
-      Body: fileBuffer,
-      ContentType: contentType,
-      Metadata: {
-        uploadedAt: new Date().toISOString(),
-        ...metadata
-      }
-    });
-
     const result = await s3Client.send(command);
-    
     return {
       success: true,
-      key: fileName,
-      url: `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`,
-      etag: result.ETag
+      key,
+      url: `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`
     };
   } catch (error) {
     console.error('S3 upload error:', error);
-    throw new Error(`Failed to upload to S3: ${error.message}`);
+    return {
+      success: false,
+      error: error.message
+    };
   }
-};
+}
 
-// Upload CSV content as string
-export const uploadCSVToS3 = async (csvContent, fileName, metadata = {}) => {
-  const buffer = Buffer.from(csvContent, 'utf-8');
-  return uploadFileToS3(buffer, fileName, 'text/csv', metadata);
-};
+export async function downloadFromS3(key) {
+  const command = new GetObjectCommand({
+    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Key: key,
+  });
 
-// Upload JSON content
-export const uploadJSONToS3 = async (jsonContent, fileName, metadata = {}) => {
-  const buffer = Buffer.from(JSON.stringify(jsonContent, null, 2), 'utf-8');
-  return uploadFileToS3(buffer, fileName, 'application/json', metadata);
-};
-
-// Generate presigned URL for download
-export const generateDownloadUrl = async (key, expiresIn = 3600) => {
   try {
-    const command = new GetObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: key,
-    });
+    const result = await s3Client.send(command);
+    return {
+      success: true,
+      body: result.Body,
+      contentType: result.ContentType,
+      contentLength: result.ContentLength
+    };
+  } catch (error) {
+    console.error('S3 download error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
 
+export async function getSignedDownloadUrl(key, expiresIn = 3600) {
+  const command = new GetObjectCommand({
+    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Key: key,
+  });
+
+  try {
     const url = await getSignedUrl(s3Client, command, { expiresIn });
-    return url;
+    return {
+      success: true,
+      url
+    };
   } catch (error) {
-    console.error('Error generating presigned URL:', error);
-    throw new Error(`Failed to generate download URL: ${error.message}`);
+    console.error('S3 signed URL error:', error);
+    return {
+      success: false,
+      error: error.message
+    };
   }
-};
+}
 
-// Get file from S3
-export const getFileFromS3 = async (key) => {
-  try {
-    const command = new GetObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: key,
-    });
-
-    const response = await s3Client.send(command);
-    return response.Body;
-  } catch (error) {
-    console.error('Error getting file from S3:', error);
-    throw new Error(`Failed to get file from S3: ${error.message}`);
-  }
-};
-
-// Delete file from S3
-export const deleteFileFromS3 = async (key) => {
-  try {
-    const command = new DeleteObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: key,
-    });
-
-    await s3Client.send(command);
-    return { success: true };
-  } catch (error) {
-    console.error('Error deleting file from S3:', error);
-    throw new Error(`Failed to delete file from S3: ${error.message}`);
-  }
-};
+// Helper function to upload file with metadata
+export async function uploadFileToS3(buffer, key, contentType, metadata = {}) {
+  return await uploadToS3(key, buffer, contentType);
+}

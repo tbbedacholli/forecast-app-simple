@@ -242,8 +242,6 @@ export default function TrainingConfiguration({ data, onUpdate, onNext, onBack, 
   const handleSaveToBoth = async () => {
     try {
       setIsDownloading(true);
-      let csvResult = null;
-      let configResult = null;
       
       // Save processed CSV
       if (processedData && processedData.length > 0) {
@@ -268,12 +266,15 @@ export default function TrainingConfiguration({ data, onUpdate, onNext, onBack, 
           });
 
           if (!csvResponse.ok) {
-            throw new Error(`CSV upload failed: ${csvResponse.status} ${csvResponse.statusText}`);
+            const errorText = await csvResponse.text();
+            throw new Error(`CSV upload failed: ${csvResponse.status} - ${errorText}`);
           }
 
-          csvResult = await csvResponse.json();
+          const csvResult = await csvResponse.json();
           setProcessedFileS3(csvResult.s3Info);
+          console.log('✅ CSV saved successfully');
         } catch (csvError) {
+          console.error('CSV save error:', csvError);
           setError(`Failed to save CSV: ${csvError.message}`);
         }
       }
@@ -291,25 +292,29 @@ export default function TrainingConfiguration({ data, onUpdate, onNext, onBack, 
               metadata: {
                 originalFile: data.fileName,
                 targetColumn: configData.target,
-                predictionLength: configData.prediction_length.toString(),
-                featuresCount: configData.dynamic_features.length.toString(),
+                predictionLength: configData.prediction_length?.toString(),
+                featuresCount: configData.dynamic_features?.length?.toString(),
                 generatedAt: new Date().toISOString()
               }
             })
           });
 
           if (!configResponse.ok) {
-            throw new Error(`Config upload failed: ${configResponse.status} ${configResponse.statusText}`);
+            const errorText = await configResponse.text();
+            throw new Error(`Config upload failed: ${configResponse.status} - ${errorText}`);
           }
 
-          configResult = await configResponse.json();
+          const configResult = await configResponse.json();
           setConfigFileS3(configResult.s3Info);
+          console.log('✅ Config saved successfully');
         } catch (configError) {
+          console.error('Config save error:', configError);
           setError(`Failed to save Config: ${configError.message}`);
         }
       }
       
     } catch (error) {
+      console.error('Save error:', error);
       setError(`Failed to save files: ${error.message}`);
     } finally {
       setIsDownloading(false);
