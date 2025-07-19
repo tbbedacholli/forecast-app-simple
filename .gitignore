@@ -97,3 +97,6 @@ jspm_packages/
 # Add this to your .gitignore
 uploads/*
 !uploads/.gitkeep
+
+# External data files
+external/

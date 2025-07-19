@@ -33,6 +33,9 @@ export default function ForecastWizard() {
     file: null,
     previewData: null,
     columns: [],
+    rawData: null,  // ← Add this
+    totalRows: 0,   // ← Add this
+    totalColumns: 0, // ← Add this
     selectedColumns: {
       target: '',
       date: '',
@@ -40,9 +43,9 @@ export default function ForecastWizard() {
       frequency: 'D',
       horizon: 30
     },
-    validation: null,
-    dataClassification: {}, // ← Store the classification results
-    autoClassified: new Set(), // ← Track auto-classified columns
+    validationResults: null,  // ← Change from 'validation' to 'validationResults'
+    dataClassification: {},
+    autoClassified: new Set(),
     featureClassification: {
       entityProperties: [],
       dynamicFeatures: [],
@@ -72,15 +75,19 @@ export default function ForecastWizard() {
       file: null,
       previewData: null,
       columns: [],
+      rawData: null,
+      totalRows: 0,
+      totalColumns: 0,
       selectedColumns: {
         target: '',
         date: '',
-        level: [], // Changed this to array
+        level: [],
         frequency: 'D',
         horizon: 30
       },
-      validation: null, // ← Add this to store validation results
+      validationResults: null,  // ← Change this too
       dataClassification: {},
+      autoClassified: new Set(),
       featureClassification: {
         entityProperties: [],
         dynamicFeatures: [],
@@ -97,7 +104,12 @@ export default function ForecastWizard() {
   };
 
   const updateWizardData = (newData) => {
-    setWizardData(prev => ({ ...prev, ...newData }));
+    console.log('📝 Updating wizard data with:', newData);
+    setWizardData(prev => {
+      const updatedData = { ...prev, ...newData };
+      console.log('📝 New wizard data state:', updatedData);
+      return updatedData;
+    });
   };
 
   const getStepContent = (step) => {

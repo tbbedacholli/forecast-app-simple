@@ -14,7 +14,7 @@ export default function WizardPage() {
       <CssBaseline />
       <Box sx={{ display: 'flex' }}>
         <Header 
-          title="Forecast Wizard" 
+          title="Create New Forecast" 
           onMenuClick={handleSidebarToggle}
         />
         <Sidebar 

@@ -1,9 +1,10 @@
 // app/api/wizard/upload/route.js
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import Papa from 'papaparse';
+import { uploadFileToS3, generateFilePath } from '../../../../utils/s3Storage';
 
 export const runtime = 'nodejs';
-export const maxDuration = 30;
+export const maxDuration = 300; // 5 minutes timeout for large files
 
 export async function POST(request) {
   try {
@@ -33,6 +34,15 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Please upload a CSV file' }, { status: 400 });
     }
 
+    // Check file size (100MB = 104,857,600 bytes)
+    const maxSize = 100 * 1024 * 1024; // 100MB
+    if (file.size > maxSize) {
+      return NextResponse.json(
+        { error: `File size exceeds 100MB limit. Current size: ${(file.size / 1024 / 1024).toFixed(2)}MB` },
+        { status: 413 }
+      );
+    }
+
     console.log('📊 Processing file:', file.name, 'Size:', file.size);
 
     // Get file content
@@ -52,8 +62,18 @@ export async function POST(request) {
     const parseResult = Papa.parse(csvContent, {
       header: true,
       skipEmptyLines: true,
-      dynamicTyping: true,
-      preview: 1000,
+      dynamicTyping: false, // Keep as strings for validation
+      worker: false, // Disable worker for server-side
+      chunk: undefined, // Process all at once
+      fastMode: false, // Use complete parsing for accuracy
+      delimiter: '', // Auto-detect delimiter
+      newline: '', // Auto-detect line endings
+      quoteChar: '"',
+      escapeChar: '"',
+      transformHeader: (header) => {
+        // Clean header names
+        return header.trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
+      }
     });
 
     console.log('📊 Parse result:', {
@@ -62,11 +82,16 @@ export async function POST(request) {
       fields: parseResult.meta?.fields || []
     });
 
-    if (parseResult.errors.length > 0) {
+    if (parseResult.errors && parseResult.errors.length > 0) {
       console.error('❌ CSV parsing errors:', parseResult.errors);
-      return NextResponse.json({ 
-        error: 'CSV parsing failed: ' + parseResult.errors[0].message 
-      }, { status: 400 });
+      // Only fail if there are fatal errors
+      const fatalErrors = parseResult.errors.filter(error => error.type === 'Delimiter');
+      if (fatalErrors.length > 0) {
+        return NextResponse.json(
+          { error: `CSV parsing failed: ${fatalErrors[0].message}` },
+          { status: 400 }
+        );
+      }
     }
 
     const { data: rows, meta } = parseResult;
@@ -76,31 +101,55 @@ export async function POST(request) {
       return NextResponse.json({ error: 'CSV file contains no data rows' }, { status: 400 });
     }
 
-    // Get column names
-    const columns = meta.fields || Object.keys(rows[0]);
-    console.log('📋 Columns found:', columns);
+    // Upload original file to S3
+    console.log('📤 Uploading original file to S3...');
+    const s3Path = generateFilePath('inputs/raw', file.name);
     
-    // Get preview data
-    const preview = rows.slice(0, 10);
-    const totalRows = rows.length;
+    const uploadResult = await uploadFileToS3(
+      Buffer.from(bytes),
+      s3Path,
+      'text/csv',
+      {
+        originalName: file.name,
+        fileSize: file.size.toString(),
+        uploadType: 'raw_input',
+        rowCount: rows.length.toString(),
+        columnCount: Object.keys(rows[0]).length.toString()
+      }
+    );
 
-    console.log('✅ Success! Rows:', totalRows, 'Columns:', columns.length);
+    console.log(`✅ File uploaded to S3: ${uploadResult.key}`);
+
+    // Get column names
+    const columns = Object.keys(rows[0]);
+    
+    console.log(`✅ Successfully parsed: ${rows.length} rows, ${columns.length} columns`);
 
     return NextResponse.json({
-      filename: file.name,
-      columns,
-      preview,
-      totalRows,
-      success: true
+      success: true,
+      preview: rows.slice(0, 10), // First 10 rows for preview
+      data: rows, // Full dataset for processing
+      columns: columns,
+      totalRows: rows.length,
+      fileSize: file.size,
+      fileName: file.name,
+      s3Info: {
+        bucket: process.env.AWS_S3_BUCKET_NAME,
+        key: uploadResult.key,
+        url: uploadResult.url
+      }
     });
 
   } catch (error) {
-    console.error('💥 Upload error:', error);
-    console.error('💥 Error stack:', error.stack);
-    
-    return NextResponse.json({ 
-      error: 'Upload failed: ' + error.message,
-      details: error.stack
-    }, { status: 500 });
+    console.error('❌ Upload API error:', error);
+    return NextResponse.json(
+      { error: `Upload failed: ${error.message}` },
+      { status: 500 }
+    );
   }
+}
+
+// Add GET handler if needed
+export async function GET() {
+  return NextResponse.json({ message: 'Upload endpoint ready' });
 }

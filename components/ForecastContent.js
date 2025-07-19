@@ -35,8 +35,10 @@ import {
   PlayArrow as RunIcon,
   Schedule as ScheduleIcon,
   TrendingUp as TrendingUpIcon,
-  Assessment as AssessmentIcon
+  Assessment as AssessmentIcon,
+  AutoAwesome as WizardIcon
 } from '@mui/icons-material';
+import { useRouter } from 'next/navigation';
 
 // Sample forecast models
 const forecastModels = [
@@ -73,13 +75,14 @@ const forecastModels = [
 ];
 
 const quickForecastTemplates = [
-  { name: 'Revenue Forecast', description: 'Predict revenue for next quarter', icon: '💰' },
-  { name: 'User Growth', description: 'Forecast user acquisition trends', icon: '👥' },
-  { name: 'Sales Pipeline', description: 'Predict sales conversion rates', icon: '📊' },
-  { name: 'Churn Prediction', description: 'Identify users likely to churn', icon: '⚠️' }
+  { name: 'Custom Data Wizard', description: 'Upload your CSV and create custom forecast', icon: '🔮', action: 'wizard' },
+  { name: 'Revenue Forecast', description: 'Predict revenue for next quarter', icon: '💰', action: 'template' },
+  { name: 'User Growth', description: 'Forecast user acquisition trends', icon: '👥', action: 'template' },
+  { name: 'Sales Pipeline', description: 'Predict sales conversion rates', icon: '📊', action: 'template' }
 ];
 
 export default function ForecastContent() {
+  const router = useRouter();
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedModel, setSelectedModel] = useState(null);
   const [runningForecast, setRunningForecast] = useState(false);
@@ -90,6 +93,16 @@ export default function ForecastContent() {
     dataSource: 'sales_data',
     schedule: 'daily'
   });
+
+  const handleTemplateClick = (template) => {
+    if (template.action === 'wizard') {
+      // Navigate to wizard
+      router.push('/wizard');
+    } else {
+      // Open template dialog
+      handleCreateModel();
+    }
+  };
 
   const handleCreateModel = () => {
     setOpenDialog(true);
@@ -122,9 +135,6 @@ export default function ForecastContent() {
     <Box sx={{ p: 2 }}>
       {/* Header Section */}
       <Box sx={{ mb: 3 }}>
-        {/* <Typography variant="h4" sx={{ fontWeight: 600, mb: 1 }}>
-          Forecast Management
-        </Typography> */}
         <Typography variant="body1" color="textSecondary">
           Create, manage, and run predictive forecasting models
         </Typography>
@@ -144,12 +154,16 @@ export default function ForecastContent() {
                     <Card 
                       sx={{ 
                         p: 2, 
-                        bgcolor: '#f8fafc', 
+                        bgcolor: template.action === 'wizard' ? '#e3f2fd' : '#f8fafc', 
                         cursor: 'pointer',
-                        '&:hover': { bgcolor: '#e2e8f0' },
-                        transition: 'background-color 0.2s'
+                        border: template.action === 'wizard' ? '2px solid #2196f3' : 'none',
+                        '&:hover': { 
+                          bgcolor: template.action === 'wizard' ? '#bbdefb' : '#e2e8f0',
+                          transform: 'translateY(-2px)'
+                        },
+                        transition: 'all 0.2s'
                       }}
-                      onClick={handleCreateModel}
+                      onClick={() => handleTemplateClick(template)}
                     >
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                         <Typography variant="h5" sx={{ mr: 1 }}>
@@ -158,6 +172,9 @@ export default function ForecastContent() {
                         <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                           {template.name}
                         </Typography>
+                        {template.action === 'wizard' && (
+                          <WizardIcon sx={{ ml: 'auto', color: '#2196f3' }} />
+                        )}
                       </Box>
                       <Typography variant="body2" color="textSecondary">
                         {template.description}
@@ -190,12 +207,20 @@ export default function ForecastContent() {
               </Box>
               <Button
                 variant="contained"
+                startIcon={<WizardIcon />}
+                fullWidth
+                onClick={() => router.push('/wizard')}
+                sx={{ mt: 2, mb: 1 }}
+              >
+                Launch Wizard
+              </Button>
+              <Button
+                variant="outlined"
                 startIcon={<AddIcon />}
                 fullWidth
                 onClick={handleCreateModel}
-                sx={{ mt: 2 }}
               >
-                New Forecast Model
+                Manual Setup
               </Button>
             </CardContent>
           </Card>
@@ -222,13 +247,22 @@ export default function ForecastContent() {
               <Typography variant="h6" sx={{ fontWeight: 600 }}>
                 Forecast Models
               </Typography>
-              <Button
-                variant="outlined"
-                startIcon={<AddIcon />}
-                onClick={handleCreateModel}
-              >
-                Add Model
-              </Button>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  variant="contained"
+                  startIcon={<WizardIcon />}
+                  onClick={() => router.push('/wizard')}
+                >
+                  Wizard
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={handleCreateModel}
+                >
+                  Add Model
+                </Button>
+              </Box>
             </Box>
           </Box>
           
