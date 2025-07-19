@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { downloadFromS3, getSignedDownloadUrl, generateFilePath, uploadCSVToS3, uploadJSONToS3 } from '../../../../utils/s3Storage';
+import { downloadFromS3, getSignedDownloadUrl } from '../../../utils/s3Storage';
 
 export async function POST(request) {
   try {
@@ -71,42 +71,20 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const filename = searchParams.get('filename') || 'template.csv';
     const type = searchParams.get('type');
-    const s3Key = searchParams.get('key');
 
-    // If downloading from S3
-    if (s3Key) {
-      const result = await getSignedDownloadUrl(s3Key);
-      
-      if (result.success) {
-        return NextResponse.redirect(result.url);
-      } else {
-        return NextResponse.json(
-          { error: 'Failed to generate download URL' },
-          { status: 500 }
-        );
-      }
-    }
-
-    // Generate template content for future values
-    if (type === 'template') {
-      const csvContent = `timestamp,item_id,feature1,feature2
+    // Generate template content
+    const csvContent = `timestamp,item_id,feature1,feature2
 2024-01-01,item_001,10,20
 2024-01-02,item_001,15,25
 2024-01-03,item_001,12,22`;
 
-      return new NextResponse(csvContent, {
-        status: 200,
-        headers: {
-          'Content-Type': 'text/csv',
-          'Content-Disposition': `attachment; filename="${filename}"`,
-        },
-      });
-    }
-
-    return NextResponse.json(
-      { error: 'Invalid request parameters' },
-      { status: 400 }
-    );
+    return new NextResponse(csvContent, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    });
 
   } catch (error) {
     console.error('Download error:', error);
