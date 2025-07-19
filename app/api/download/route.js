@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateDownloadUrl, uploadCSVToS3, uploadJSONToS3, generateFilePath } from '../../../../utils/s3Storage';
+import { downloadFromS3, getSignedDownloadUrl, generateFilePath, uploadCSVToS3, uploadJSONToS3 } from '../../../../utils/s3Storage';
 
 export async function POST(request) {
   try {
@@ -43,7 +43,7 @@ export async function POST(request) {
     }
 
     // Generate presigned URL for immediate download
-    const downloadUrl = await generateDownloadUrl(uploadResult.key, 3600); // 1 hour expiry
+    const downloadUrl = await getSignedDownloadUrl(uploadResult.key); // 1 hour expiry
 
     return NextResponse.json({
       success: true,
@@ -69,26 +69,49 @@ export async function POST(request) {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const key = searchParams.get('key');
+    const filename = searchParams.get('filename') || 'template.csv';
+    const type = searchParams.get('type');
+    const s3Key = searchParams.get('key');
 
-    if (!key) {
-      return NextResponse.json(
-        { error: 'Missing S3 key parameter' },
-        { status: 400 }
-      );
+    // If downloading from S3
+    if (s3Key) {
+      const result = await getSignedDownloadUrl(s3Key);
+      
+      if (result.success) {
+        return NextResponse.redirect(result.url);
+      } else {
+        return NextResponse.json(
+          { error: 'Failed to generate download URL' },
+          { status: 500 }
+        );
+      }
     }
 
-    const downloadUrl = await generateDownloadUrl(key, 3600);
+    // Generate template content for future values
+    if (type === 'template') {
+      const csvContent = `timestamp,item_id,feature1,feature2
+2024-01-01,item_001,10,20
+2024-01-02,item_001,15,25
+2024-01-03,item_001,12,22`;
 
-    return NextResponse.json({
-      downloadUrl,
-      key
-    });
+      return new NextResponse(csvContent, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+        },
+      });
+    }
+
+    return NextResponse.json(
+      { error: 'Invalid request parameters' },
+      { status: 400 }
+    );
 
   } catch (error) {
-    console.error('❌ Get download URL error:', error);
+    console.error('Download error:', error);
     return NextResponse.json(
-      { error: `Failed to generate download URL: ${error.message}` },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }

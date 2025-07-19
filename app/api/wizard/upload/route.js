@@ -1,10 +1,6 @@
-// app/api/wizard/upload/route.js
-import { NextRequest, NextResponse } from 'next/server';
-import Papa from 'papaparse';
-import { uploadFileToS3, generateFilePath } from '../../../../utils/s3Storage';
-
-export const runtime = 'nodejs';
-export const maxDuration = 300; // 5 minutes timeout for large files
+// app/api/upload/route.js
+import { NextResponse } from 'next/server';
+import { uploadToS3 } from '../../../utils/s3Storage';
 
 export async function POST(request) {
   try {
