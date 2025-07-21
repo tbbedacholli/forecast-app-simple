@@ -1,0 +1,21 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - npm ci
+    build:
+      commands:
+        # Add the following lines to your build phase
+        # This command writes the Amplify environment variables into a .env.production file.
+        - env | grep -e MY_REGION -e MY_S3_BUCKET_NAME -e MY_ACCESS_KEY_ID -e MY_SECRET_ACCESS_KEY >> .env.production
+        - npm run build
+  artifacts:
+    # Set the base directory to your framework's build output folder
+    # For Next.js, this is usually ".next"
+    baseDirectory: .next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
