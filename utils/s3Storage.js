@@ -2,10 +2,10 @@ import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION || 'us-east-1',
+  region: process.env.MY_REGION || 'us-east-1',
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    accessKeyId: process.env.MY_ACCESS_KEY_ID,
+    secretAccessKey: process.env.MY_SECRET_ACCESS_KEY,
   },
 });
 
@@ -18,7 +18,7 @@ export function generateFilePath(prefix, filename) {
 
 export async function uploadToS3(key, body, contentType = 'application/octet-stream') {
   const command = new PutObjectCommand({
-    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Bucket: process.env.MY_S3_BUCKET_NAME,
     Key: key,
     Body: body,
     ContentType: contentType,
@@ -29,7 +29,7 @@ export async function uploadToS3(key, body, contentType = 'application/octet-str
     return {
       success: true,
       key,
-      url: `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`
+      url: `https://${process.env.MY_S3_BUCKET_NAME}.s3.${process.env.MY_REGION}.amazonaws.com/${key}`
     };
   } catch (error) {
     console.error('S3 upload error:', error);
@@ -42,7 +42,7 @@ export async function uploadToS3(key, body, contentType = 'application/octet-str
 
 export async function downloadFromS3(key) {
   const command = new GetObjectCommand({
-    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Bucket: process.env.MY_S3_BUCKET_NAME,
     Key: key,
   });
 
@@ -65,7 +65,7 @@ export async function downloadFromS3(key) {
 
 export async function getSignedDownloadUrl(key, expiresIn = 3600) {
   const command = new GetObjectCommand({
-    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Bucket: process.env.MY_S3_BUCKET_NAME,
     Key: key,
   });
 
