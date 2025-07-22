@@ -40,250 +40,193 @@ const DATA_TYPES = [
   { value: 'text', label: 'Text/String', color: 'default' }
 ];
 
-export default function DataClassification({ data, onUpdate, onNext, onBack, setError }) {
-  console.log('🔍 DataClassification received data:', {
-    hasValidationResults: !!data?.validationResults,
-    hasColumnAnalysis: !!data?.validationResults?.columnAnalysis,
-    columnAnalysis: data?.validationResults?.columnAnalysis,
-    columns: data?.columns,
-    selectedColumns: data?.selectedColumns
-  });
+// Helper function to get validation info for a column
+const getValidationInfo = (column, data) => {
+  if (!data || !column) return null;
+  return data.validationResults?.columnAnalysis?.[column] || null;
+};
 
-  const [dataClassification, setDataClassification] = useState({});
+// Helper function to get type color
+const getTypeColor = (type) => {
+  const typeConfig = DATA_TYPES.find(t => t.value === type);
+  return typeConfig?.color || 'default';
+};
+
+// Update the getClassificationSummary function
+const getClassificationSummary = (classifications) => {
+  const summary = {};
+  // Add null check
+  if (!classifications) return summary;
+  
+  Object.values(classifications).forEach(type => {
+    if (type) { // Add check for valid type
+      summary[type] = (summary[type] || 0) + 1;
+    }
+  });
+  return summary;
+};
+
+// Helper function to get confidence icon
+const getConfidenceIcon = (column, data) => {
+  if (!data || !column) return null;
+  
+  const validation = getValidationInfo(column, data);
+  if (!validation) return null;
+
+  const confidence = validation.confidence || 0;
+  if (confidence >= 0.8) {
+    return <CheckCircle fontSize="small" color="success" />;
+  } else if (confidence >= 0.5) {
+    return <Warning fontSize="small" color="warning" />;
+  }
+  return <Error fontSize="small" color="error" />;
+};
+
+// Helper function to get enhanced validation tooltip content
+const getEnhancedValidationTooltip = (column, data) => {
+  if (!data || !column) return 'No validation data available';
+  
+  const validation = getValidationInfo(column, data);
+  if (!validation) return 'No validation data available';
+
+  return (
+    <Box>
+      <Typography variant="subtitle2" sx={{ mb: 1 }}>Column Analysis</Typography>
+      <Typography variant="body2">
+        • Type: {validation.type}<br />
+        • Unique Values: {validation.uniqueCount}<br />
+        • Null Count: {validation.nullCount}<br />
+        • Confidence: {(validation.confidence * 100).toFixed(0)}%
+      </Typography>
+    </Box>
+  );
+};
+
+export default function DataClassification({ data, onUpdate, onNext, onBack, setError }) {
+  // Add state for tracking classifications
+  const [classifications, setClassifications] = useState({});
   const [autoClassified, setAutoClassified] = useState(new Set());
 
-  // Initialize data classification from upload validation results
+  // Initialize classifications from validation results
   useEffect(() => {
-    if (data.validationResults?.columnAnalysis && Object.keys(dataClassification).length === 0) {
-      const initialClassification = {};
+    if (data.validationResults?.columnAnalysis) {
+      const initialClassifications = {};
       const autoClassifiedColumns = new Set();
-      
-      // Pre-populate with detected types from upload validation
-      Object.entries(data.validationResults.columnAnalysis).forEach(([columnName, analysis]) => {
-        initialClassification[columnName] = analysis.type;
-        autoClassifiedColumns.add(columnName);
-      });
-      
-      setDataClassification(initialClassification);
-      setAutoClassified(autoClassifiedColumns);
-      
-      // Update parent component
-      onUpdate({ 
-        dataClassification: initialClassification,
-        autoClassified: autoClassifiedColumns
-      });
-    }
-  }, [data.validationResults, onUpdate]);
 
+      // Set initial classifications from validation results
+      Object.entries(data.validationResults.columnAnalysis).forEach(([column, analysis]) => {
+        initialClassifications[column] = analysis.type;
+        autoClassifiedColumns.add(column);
+      });
+
+      // Override with any user classifications
+      if (data.dataClassification?.userClassified) {
+        Object.entries(data.dataClassification.userClassified).forEach(([column, type]) => {
+          initialClassifications[column] = type;
+          autoClassifiedColumns.delete(column); // Remove from auto-classified if user modified
+        });
+      }
+
+      setClassifications(initialClassifications);
+      setAutoClassified(autoClassifiedColumns);
+    }
+  }, [data.validationResults, data.dataClassification]);
+
+  // Log the current state of classifications and autoClassified columns
+  useEffect(() => {
+    console.log('Classifications State:', {
+      classifications,
+      autoClassified: Array.from(autoClassified),
+      columns: data.columns,
+      validationResults: data.validationResults
+    });
+  }, [classifications, autoClassified, data]);
+
+  // Handle type changes
   const handleTypeChange = (column, newType) => {
-    const updated = { ...dataClassification, [column]: newType };
-    setDataClassification(updated);
-    
-    // Remove from auto-classified if user manually changed it
-    const newAutoClassified = new Set(autoClassified);
-    newAutoClassified.delete(column);
-    setAutoClassified(newAutoClassified);
-    
-    onUpdate({ 
-      dataClassification: updated,
-      autoClassified: newAutoClassified
+    // Update local state
+    setClassifications(prev => ({
+      ...prev,
+      [column]: newType
+    }));
+
+    // Update parent state
+    onUpdate({
+      dataClassification: {
+        ...data.dataClassification,
+        userClassified: {
+          ...(data.dataClassification?.userClassified || {}),
+          [column]: newType
+        }
+      }
     });
   };
 
-  const handleAutoClassify = () => {
-    if (!data.validationResults?.columnAnalysis) {
-      setError('No validation data available for auto-classification');
+  // Get current type for a column
+  const getCurrentType = (column) => {
+    // First check local state
+    if (classifications[column]) {
+      return classifications[column];
+    }
+    // Then check validation results
+    return data.validationResults?.columnAnalysis?.[column]?.type || 'unknown';
+  };
+
+  // Add handleNext function
+  const handleNext = () => {
+    // Validate all columns have classifications
+    if (Object.keys(classifications).length !== data.columns?.length) {
+      setError("Please classify all columns before proceeding");
       return;
     }
 
-    const autoClassification = {};
+    // Update final state before proceeding
+    onUpdate({
+      dataClassification: {
+        autoClassified: Object.fromEntries(
+          Array.from(autoClassified).map(column => [column, classifications[column]])
+        ),
+        userClassified: Object.fromEntries(
+          Object.entries(classifications)
+            .filter(([column]) => !autoClassified.has(column))
+            .map(([column, type]) => [column, type])
+        )
+      }
+    });
+
+    // Proceed to next step
+    onNext();
+  };
+
+  // Add handleAutoClassify function
+  const handleAutoClassify = () => {
+    if (!data.validationResults?.columnAnalysis) {
+      setError("No validation results available for auto-classification");
+      return;
+    }
+
+    // Reset to auto-detected types
+    const newClassifications = {};
     const newAutoClassified = new Set();
-    
-    Object.entries(data.validationResults.columnAnalysis).forEach(([columnName, analysis]) => {
-      autoClassification[columnName] = analysis.type;
-      newAutoClassified.add(columnName);
+
+    Object.entries(data.validationResults.columnAnalysis).forEach(([column, analysis]) => {
+      newClassifications[column] = analysis.type;
+      newAutoClassified.add(column);
     });
-    
-    setDataClassification(autoClassification);
+
+    // Update local state
+    setClassifications(newClassifications);
     setAutoClassified(newAutoClassified);
-    
-    onUpdate({ 
-      dataClassification: autoClassification,
-      autoClassified: newAutoClassified
+
+    // Update parent state
+    onUpdate({
+      dataClassification: {
+        autoClassified: Object.fromEntries(
+          Object.entries(newClassifications)
+        ),
+        userClassified: {} // Clear user classifications
+      }
     });
-  };
-
-  const getTypeColor = (type) => {
-    const typeInfo = DATA_TYPES.find(t => t.value === type);
-    return typeInfo ? typeInfo.color : 'default';
-  };
-
-  const getValidationInfo = (column) => {
-    const analysis = data.validationResults?.columnAnalysis[column];
-    if (!analysis) return null;
-
-    return {
-      issues: analysis.issues || [],
-      warnings: analysis.warnings || [],
-      suggestions: analysis.suggestions || [],
-      confidence: analysis.confidence || 0.8
-    };
-  };
-
-  const getConfidenceIcon = (column) => {
-    const validation = getValidationInfo(column);
-    if (!validation) return null;
-
-    if (validation.issues.length > 0) {
-      return <Error color="error" fontSize="small" />;
-    } else if (validation.warnings.length > 0) {
-      return <Warning color="warning" fontSize="small" />;
-    } else {
-      return <CheckCircle color="success" fontSize="small" />;
-    }
-  };
-
-  const validateClassification = () => {
-    const missingColumns = data.columns.filter(col => !dataClassification[col]);
-    
-    if (missingColumns.length > 0) {
-      setError(`Please classify all columns: ${missingColumns.join(', ')}`);
-      return false;
-    }
-    
-    setError('');
-    return true;
-  };
-
-  const handleNext = () => {
-    if (validateClassification()) {
-      onNext();
-    }
-  };
-
-  const getClassificationSummary = () => {
-    const summary = {};
-    Object.values(dataClassification).forEach(type => {
-      summary[type] = (summary[type] || 0) + 1;
-    });
-    return summary;
-  };
-
-  // Replace the getEnhancedValidationTooltip function (around line 146):
-  const getEnhancedValidationTooltip = (column) => {
-    const analysis = data.validationResults?.columnAnalysis[column];
-    const validation = getValidationInfo(column);
-    
-    if (!analysis && !validation) return null;
-
-    return (
-      <Box sx={{ maxWidth: 500 }}>
-        {/* Confidence and Type Info */}
-        <Box sx={{ mb: 2, p: 1, bgcolor: '#e3f2fd', borderRadius: 1 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            🎯 Detection Results
-          </Typography>
-          <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-            Type: <strong>{analysis?.type || 'Unknown'}</strong> 
-            {analysis?.confidence && ` (Confidence: ${(analysis.confidence * 100).toFixed(0)}%)`}
-          </Typography>
-          {analysis?.reasoning && (
-            <Typography variant="body2" sx={{ fontSize: '0.8rem', mt: 0.5 }}>
-              Reason: {analysis.reasoning}
-            </Typography>
-          )}
-        </Box>
-
-        {/* Analysis Details */}
-        {analysis && (
-          <Box sx={{ mb: 2, p: 1, bgcolor: '#f3e5f5', borderRadius: 1 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-              📊 Analysis Details
-            </Typography>
-            {analysis.totalValues && (
-              <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-                • Total values: {analysis.totalValues}
-              </Typography>
-            )}
-            {analysis.uniqueCount && (
-              <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-                • Unique values: {analysis.uniqueCount}
-              </Typography>
-            )}
-            {analysis.nullCount !== undefined && (
-              <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-                • Null values: {analysis.nullCount}
-              </Typography>
-            )}
-            {analysis.numericRatio !== undefined && (
-              <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-                • Numeric ratio: {(analysis.numericRatio * 100).toFixed(1)}%
-              </Typography>
-            )}
-            {analysis.dateRatio !== undefined && (
-              <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-                • Date ratio: {(analysis.dateRatio * 100).toFixed(1)}%
-              </Typography>
-            )}
-          </Box>
-        )}
-
-        {/* Sample Values */}
-        {analysis?.samples && analysis.samples.length > 0 && (
-          <Box sx={{ mb: 2, p: 1, bgcolor: '#fff3e0', borderRadius: 1 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-              📋 Sample Values
-            </Typography>
-            <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-              {analysis.samples.slice(0, 5).join(', ')}
-              {analysis.samples.length > 5 && '...'}
-            </Typography>
-          </Box>
-        )}
-
-        {/* Issues */}
-        {validation?.issues && validation.issues.length > 0 && (
-          <Box sx={{ mb: 2, p: 1, bgcolor: '#ffebee', borderRadius: 1 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5, color: 'error.main' }}>
-              ⚠️ Issues
-            </Typography>
-            {validation.issues.map((issue, index) => (
-              <Typography key={index} variant="body2" sx={{ fontSize: '0.8rem', color: 'error.main' }}>
-                • {issue}
-              </Typography>
-            ))}
-          </Box>
-        )}
-
-        {/* Warnings */}
-        {validation?.warnings && validation.warnings.length > 0 && (
-          <Box sx={{ mb: 2, p: 1, bgcolor: '#fff8e1', borderRadius: 1 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5, color: 'warning.main' }}>
-              ⚠️ Warnings
-            </Typography>
-            {validation.warnings.map((warning, index) => (
-              <Typography key={index} variant="body2" sx={{ fontSize: '0.8rem', color: 'warning.main' }}>
-                • {warning}
-              </Typography>
-            ))}
-          </Box>
-        )}
-
-        {/* Suggestions */}
-        {validation?.suggestions && validation.suggestions.length > 0 && (
-          <Box sx={{ mb: 1, p: 1, bgcolor: '#e8f5e8', borderRadius: 1 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5, color: 'info.main' }}>
-              💡 Suggestions
-            </Typography>
-            {validation.suggestions.map((suggestion, index) => (
-              <Typography key={index} variant="body2" sx={{ fontSize: '0.8rem', color: 'info.main' }}>
-                • {suggestion}
-              </Typography>
-            ))}
-          </Box>
-        )}
-      </Box>
-    );
   };
 
   return (
@@ -303,7 +246,7 @@ export default function DataClassification({ data, onUpdate, onNext, onBack, set
       </Alert>
 
       {/* Classification Overview Card */}
-      {Object.keys(dataClassification).length > 0 && (
+      {Object.keys(data.dataClassification?.userClassified || {}).length > 0 && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
@@ -316,7 +259,7 @@ export default function DataClassification({ data, onUpdate, onNext, onBack, set
             <Grid container spacing={2}>
               <Grid item xs={12} md={8}>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                  {Object.entries(getClassificationSummary()).map(([type, count]) => (
+                  {Object.entries(getClassificationSummary(classifications)).map(([type, count]) => (
                     <Chip
                       key={type}
                       label={`${type}: ${count} columns`}
@@ -353,9 +296,9 @@ export default function DataClassification({ data, onUpdate, onNext, onBack, set
 
       {/* Column Classification Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        {data.columns.map((column) => {
-          const validation = getValidationInfo(column);
-          const analysis = data.validationResults?.columnAnalysis[column];
+        {data.columns?.map((column) => {
+          const validation = getValidationInfo(column, data);
+          const analysis = data.validationResults?.columnAnalysis?.[column];
           
           return (
             <Grid item xs={12} md={6} lg={4} key={column}>
@@ -433,7 +376,7 @@ export default function DataClassification({ data, onUpdate, onNext, onBack, set
                   <FormControl fullWidth sx={{ mb: 2 }}>
                     <InputLabel>Data Type</InputLabel>
                     <Select
-                      value={dataClassification[column] || ''}
+                      value={getCurrentType(column)}
                       onChange={(e) => handleTypeChange(column, e.target.value)}
                       label="Data Type"
                       displayEmpty
@@ -468,11 +411,11 @@ export default function DataClassification({ data, onUpdate, onNext, onBack, set
                       </Typography>
                     </Box>
                     
-                    {dataClassification[column] && (
+                    {classifications[column] && (
                       <Chip
-                        label={dataClassification[column]}
+                        label={classifications[column]}
                         size="small"
-                        color={getTypeColor(dataClassification[column])}
+                        color={getTypeColor(classifications[column])}
                         variant="filled"
                       />
                     )}
@@ -504,6 +447,16 @@ export default function DataClassification({ data, onUpdate, onNext, onBack, set
                       </Box>
                     </Box>
                   )}
+
+                  {/* Add indicator for auto/manual classification */}
+                  <Box sx={{ mt: 1 }}>
+                    <Chip
+                      size="small"
+                      label={autoClassified.has(column) ? "Auto Classified" : "User Modified"}
+                      color={autoClassified.has(column) ? "info" : "primary"}
+                      variant="outlined"
+                    />
+                  </Box>
                 </CardContent>
               </Card>
             </Grid>
@@ -536,11 +489,11 @@ export default function DataClassification({ data, onUpdate, onNext, onBack, set
                           <Typography variant="body2" sx={{ fontWeight: 600 }}>
                             {column}
                           </Typography>
-                          {dataClassification[column] && (
+                          {classifications[column] && (
                             <Chip
-                              label={dataClassification[column]}
+                              label={classifications[column]}
                               size="small"
-                              color={getTypeColor(dataClassification[column])}
+                              color={getTypeColor(classifications[column])}
                               variant="outlined"
                             />
                           )}
@@ -588,7 +541,7 @@ export default function DataClassification({ data, onUpdate, onNext, onBack, set
         <Button
           variant="contained"
           onClick={handleNext}
-          disabled={Object.keys(dataClassification).length !== data.columns.length}
+          disabled={Object.keys(classifications).length !== data.columns?.length}
           size="large"
           sx={{
             px: 4,

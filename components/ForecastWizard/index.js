@@ -1,6 +1,8 @@
 // components/ForecastWizard/index.js
-'use client';
-import { useState } from 'react';
+"use client";
+import { useState } from "react";
+
+// Material-UI Components
 import {
   Box,
   Card,
@@ -9,182 +11,132 @@ import {
   Step,
   StepLabel,
   Typography,
-  Alert
-} from '@mui/material';
-import FileUpload from './FileUpload';
-import ColumnSelection from './ColumnSelection';
-import DataClassification from './DataClassification';
-import FeatureClassification from './FeatureClassification';
-import TrainingConfiguration from './TrainingConfiguration';
-import ModelTraining from './ModelTraining';
+  Alert,
+} from "@mui/material";
 
+// Wizard Step Components
+import FileUpload from "./FileUpload";
+import DataClassification from "./DataClassification";
+import ColumnSelection from "./ColumnSelection";
+import AggregationConfig from "./AggregationConfig";
+import FeatureClassification from "./FeatureClassification";
+import TrainingConfiguration from "./TrainingConfiguration";
+import ModelTraining from "./ModelTraining";
+
+// Wizard Steps Configuration
 const steps = [
-  'Upload Data',
-  'Select Columns',
-  'Data Classification',
-  'Feature Classification',
-  'Training Configuration',
-  'Model Training'
+  "Upload Data",
+  "Data Classification",
+  "Select Columns",
+  "Configure Aggregation",
+  "Feature Classification",
+  "Training Configuration",
+  "Model Training"
 ];
 
+// Initial wizard state
+const initialWizardState = {
+  file: null,
+  previewData: null,
+  columns: [],
+  rawData: null,
+  totalRows: 0,
+  totalColumns: 0,
+  selectedColumns: {
+    target: "",
+    date: "",
+    level: [],
+    frequency: "",
+    horizon: "",
+  },
+  validationResults: null,
+  dataClassification: {
+    autoClassified: {},    // Original automatic classifications
+    userClassified: {},    // User's manual changes to classifications
+  },
+  featureClassification: {
+    entityProperties: [],
+    dynamicFeatures: [],
+    selectedFutureFeatures: [],
+  },
+  trainingConfig: {
+    type: "standard",
+    parameters: {},
+  },
+  aggregatedData: null,
+  futureTemplate: null,
+  aggregationRules: {},
+};
+
 export default function ForecastWizard() {
+  // State Management
   const [activeStep, setActiveStep] = useState(0);
-  const [wizardData, setWizardData] = useState({
-    file: null,
-    previewData: null,
-    columns: [],
-    rawData: null,  // ← Add this
-    totalRows: 0,   // ← Add this
-    totalColumns: 0, // ← Add this
-    selectedColumns: {
-      target: '',
-      date: '',
-      level: [],
-      frequency: 'D',
-      horizon: 30
-    },
-    validationResults: null,  // ← Change from 'validation' to 'validationResults'
-    dataClassification: {},
-    autoClassified: new Set(),
-    featureClassification: {
-      entityProperties: [],
-      dynamicFeatures: [],
-      selectedFutureFeatures: []
-    },
-    trainingConfig: {
-      type: 'standard',
-      parameters: {}
-    },
-    aggregatedData: null,
-    futureTemplate: null
-  });
-  const [error, setError] = useState('');
+  const [wizardData, setWizardData] = useState(initialWizardState);
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleNext = () => {
-    setActiveStep((prevStep) => prevStep + 1);
-  };
-
-  const handleBack = () => {
-    setActiveStep((prevStep) => prevStep - 1);
-  };
-
+  // Navigation Handlers
+  const handleNext = () => setActiveStep((prev) => prev + 1);
+  const handleBack = () => setActiveStep((prev) => prev - 1);
   const handleReset = () => {
     setActiveStep(0);
-    setWizardData({
-      file: null,
-      previewData: null,
-      columns: [],
-      rawData: null,
-      totalRows: 0,
-      totalColumns: 0,
-      selectedColumns: {
-        target: '',
-        date: '',
-        level: [],
-        frequency: 'D',
-        horizon: 30
-      },
-      validationResults: null,  // ← Change this too
-      dataClassification: {},
-      autoClassified: new Set(),
-      featureClassification: {
-        entityProperties: [],
-        dynamicFeatures: [],
-        selectedFutureFeatures: []
-      },
-      trainingConfig: {
-        type: 'standard',
-        parameters: {}
-      },
-      aggregatedData: null,
-      futureTemplate: null
-    });
-    setError('');
+    setWizardData(initialWizardState);
+    setError("");
   };
 
+  // Data Update Handler
   const updateWizardData = (newData) => {
-    console.log('📝 Updating wizard data with:', newData);
-    setWizardData(prev => {
+    console.log("📝 Updating wizard data with:", newData);
+    setWizardData((prev) => {
       const updatedData = { ...prev, ...newData };
-      console.log('📝 New wizard data state:', updatedData);
+      console.log("📝 New wizard data state:", updatedData);
       return updatedData;
     });
   };
 
+  // Step content renderer
   const getStepContent = (step) => {
+    const commonProps = {
+      data: wizardData,
+      onUpdate: updateWizardData,
+      onNext: handleNext,
+      onBack: handleBack,
+      setError, // Add this
+    };
+
     switch (step) {
       case 0:
-        return (
-          <FileUpload 
-            data={wizardData} 
-            onUpdate={updateWizardData}
-            onNext={handleNext}
-            setError={setError}
-            setLoading={setLoading}
-          />
-        );
+        return <FileUpload {...commonProps} />;
       case 1:
-        return (
-          <ColumnSelection 
-            data={wizardData} 
-            onUpdate={updateWizardData}
-            onNext={handleNext}
-            onBack={handleBack}
-            setError={setError}
-          />
-        );
+        return <DataClassification {...commonProps} />;
       case 2:
-        return (
-          <DataClassification 
-            data={wizardData} 
-            onUpdate={updateWizardData}
-            onNext={handleNext}
-            onBack={handleBack}
-            setError={setError}
-          />
-        );
+        return <ColumnSelection {...commonProps} />;
       case 3:
-        return (
-          <FeatureClassification 
-            data={wizardData} 
-            onUpdate={updateWizardData}
-            onNext={handleNext}
-            onBack={handleBack}
-            setError={setError}
-          />
-        );
+        return <AggregationConfig {...commonProps} />;
       case 4:
-        return (
-          <TrainingConfiguration 
-            data={wizardData} 
-            onUpdate={updateWizardData}
-            onNext={handleNext}
-            onBack={handleBack}
-            setError={setError}
-          />
-        );
+        return <FeatureClassification {...commonProps} />;
       case 5:
+        return <TrainingConfiguration {...commonProps} />;
+      case 6:
         return (
-          <ModelTraining 
-            data={wizardData} 
-            onUpdate={updateWizardData}
+          <ModelTraining
+            {...commonProps}
             onReset={handleReset}
-            setError={setError}
             setLoading={setLoading}
           />
         );
       default:
-        return 'Unknown step';
+        return "Unknown step";
     }
   };
 
+  // Render
   return (
-    <Box sx={{ width: '100%', maxWidth: 1200, mx: 'auto' }}>
+    <Box sx={{ width: "100%", maxWidth: 1200, mx: "auto" }}>
       <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>
         🧙‍♂️ Forecast Wizard
       </Typography>
-      
+
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Stepper activeStep={activeStep} alternativeLabel>
@@ -204,9 +156,7 @@ export default function ForecastWizard() {
       )}
 
       <Card>
-        <CardContent>
-          {getStepContent(activeStep)}
-        </CardContent>
+        <CardContent>{getStepContent(activeStep)}</CardContent>
       </Card>
     </Box>
   );

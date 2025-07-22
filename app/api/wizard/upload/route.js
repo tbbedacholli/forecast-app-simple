@@ -30,6 +30,8 @@ export async function POST(request) {
     
     const data = await request.formData();
     const file = data.get('file');
+    const fileType = data.get('fileType');
+    const uploadPath = data.get('uploadPath');
 
     if (!file) {
       console.error('❌ No file in form data');
@@ -80,12 +82,17 @@ export async function POST(request) {
       return NextResponse.json({ error: 'CSV file contains no data rows' }, { status: 400 });
     }
 
-    // Try to upload to S3, but don't fail if S3 is unavailable
+    // Determine the upload path based on file type
+    const s3Path = generateFilePath(
+      uploadPath || 'inputs/raw', // Use provided path or default
+      file.name
+    );
+
+    // Try to upload to S3
     let s3Info = null;
     try {
       if (uploadToS3) {
-        console.log('📤 Uploading to S3...');
-        const s3Path = generateFilePath('inputs/raw', file.name);
+        console.log(`📤 Uploading to S3 path: ${s3Path}`);
         const uploadResult = await uploadFileToS3(Buffer.from(bytes), s3Path, 'text/csv');
         
         if (uploadResult.success) {
@@ -98,7 +105,8 @@ export async function POST(request) {
         }
       }
     } catch (s3Error) {
-      console.warn('⚠️ S3 upload failed, continuing without S3:', s3Error.message);
+      console.warn('⚠️ S3 upload failed:', s3Error.message);
+      throw s3Error; // Rethrow to handle in the main try-catch
     }
 
     const columns = Object.keys(rows[0]);

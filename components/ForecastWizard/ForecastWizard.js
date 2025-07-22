@@ -1,5 +1,5 @@
-'use client';
-import { useState } from 'react';
+"use client";
+import { useState } from "react";
 import {
   Box,
   Stepper,
@@ -7,15 +7,15 @@ import {
   StepLabel,
   Paper,
   Alert,
-  LinearProgress
-} from '@mui/material';
+  LinearProgress,
+} from "@mui/material";
 
 // Import all your step components
-import FileUpload from './FileUpload';
-import ColumnSelection from './ColumnSelection';
-import DataClassification from './DataClassification';
-import FeatureClassification from './FeatureClassification';
-import TrainingConfiguration from './TrainingConfiguration';
+import FileUpload from "./FileUpload";
+import ColumnSelection from "./ColumnSelection";
+import DataClassification from "./DataClassification";
+import FeatureClassification from "./FeatureClassification";
+import TrainingConfiguration from "./TrainingConfiguration";
 
 export default function ForecastWizard() {
   const [currentStep, setCurrentStep] = useState(0);
@@ -27,32 +27,36 @@ export default function ForecastWizard() {
     featureClassification: {},
     futureValues: {},
     processedData: null,
-    fileName: '',
-    isProcessed: false
+    fileName: "",
+    isProcessed: false,
+    dataClassification: {
+      autoClassified: {}, // Add this for storing auto-classified columns
+      userClassified: {}, // Add this for storing user modifications
+    },
   });
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const steps = [
-    'Upload Data',
-    'Configure Parameters', 
-    'Data Classification',
-    'Feature Classification',
-    'Training Configuration'
+    "Upload Data",
+    "Data Classification",
+    "Configure Parameters",
+    "Feature Classification",
+    "Training Configuration",
   ];
 
   const handleNext = () => {
-    setError('');
-    setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
+    setError("");
+    setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
   };
 
   const handleBack = () => {
-    setError('');
-    setCurrentStep(prev => Math.max(prev - 1, 0));
+    setError("");
+    setCurrentStep((prev) => Math.max(prev - 1, 0));
   };
 
   const handleDataUpdate = (newData) => {
-    console.log('📊 Wizard data updated:', newData);
+    console.log("📊 Wizard data updated:", newData);
     setWizardData(newData);
   };
 
@@ -63,22 +67,18 @@ export default function ForecastWizard() {
       onNext: handleNext,
       onBack: handleBack,
       setError,
-      setLoading
+      setLoading,
     };
+
+    console.log("Before rendering ColumnSelection, wizardData:", wizardData); // Add this line
 
     switch (currentStep) {
       case 0:
-        return (
-          <FileUpload 
-            {...commonProps}
-            // FileUpload doesn't need onBack
-            onBack={undefined}
-          />
-        );
+        return <FileUpload {...commonProps} />;
       case 1:
-        return <ColumnSelection {...commonProps} />;
-      case 2:
         return <DataClassification {...commonProps} />;
+      case 2:
+        return <ColumnSelection {...commonProps} />;
       case 3:
         return <FeatureClassification {...commonProps} />;
       case 4:
@@ -95,7 +95,7 @@ export default function ForecastWizard() {
   };
 
   return (
-    <Box sx={{ width: '100%', p: 3 }}>
+    <Box sx={{ width: "100%", p: 3 }}>
       {/* Header */}
       <Box sx={{ mb: 4 }}>
         <h1>🔮 Forecast Wizard</h1>
@@ -107,10 +107,10 @@ export default function ForecastWizard() {
         <Stepper activeStep={currentStep} sx={{ mb: 2 }}>
           {steps.map((label, index) => (
             <Step key={label}>
-              <StepLabel 
+              <StepLabel
                 optional={
                   index === currentStep && loading ? (
-                    <LinearProgress sx={{ mt: 1, width: '100%' }} />
+                    <LinearProgress sx={{ mt: 1, width: "100%" }} />
                   ) : null
                 }
               >
@@ -122,7 +122,7 @@ export default function ForecastWizard() {
 
         {/* Error Display */}
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>
             {error}
           </Alert>
         )}
@@ -141,21 +141,28 @@ export default function ForecastWizard() {
       </Paper>
 
       {/* Debug Info (remove in production) */}
-      {process.env.NODE_ENV === 'development' && (
-        <Box sx={{ mt: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+      {process.env.NODE_ENV === "development" && (
+        <Box sx={{ mt: 2, p: 2, bgcolor: "#f5f5f5", borderRadius: 1 }}>
           <details>
             <summary>🔍 Debug Info (Development Only)</summary>
-            <pre style={{ fontSize: '12px', overflow: 'auto' }}>
-              {JSON.stringify({
-                currentStep,
-                dataKeys: Object.keys(wizardData),
-                hasRawData: !!wizardData.rawData?.length,
-                hasValidation: !!wizardData.validation,
-                selectedColumns: wizardData.selectedColumns,
-                featureClassCount: Object.keys(wizardData.featureClassification || {}).length,
-                futureValuesCount: Object.keys(wizardData.futureValues || {}).length,
-                isProcessed: wizardData.isProcessed
-              }, null, 2)}
+            <pre style={{ fontSize: "12px", overflow: "auto" }}>
+              {JSON.stringify(
+                {
+                  currentStep,
+                  dataKeys: Object.keys(wizardData),
+                  hasRawData: !!wizardData.rawData?.length,
+                  hasValidation: !!wizardData.validation,
+                  selectedColumns: wizardData.selectedColumns,
+                  featureClassCount: Object.keys(
+                    wizardData.featureClassification || {}
+                  ).length,
+                  futureValuesCount: Object.keys(wizardData.futureValues || {})
+                    .length,
+                  isProcessed: wizardData.isProcessed,
+                },
+                null,
+                2
+              )}
             </pre>
           </details>
         </Box>
