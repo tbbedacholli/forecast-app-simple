@@ -34,46 +34,116 @@ const CATEGORICAL_AGGREGATIONS = [
 export default function AggregationConfig({ data, onUpdate, onNext, onBack }) {
   const [aggregationRules, setAggregationRules] = useState({});
 
-  // Helper function to get effective column type
+  // Update the getEffectiveColumnType function
   const getEffectiveColumnType = (column) => {
-    // First check user classifications (overrides)
+    // Debug log
+    console.log(`Checking type for column: ${column}`);
+
+    // First check user classifications
     if (data.dataClassification?.userClassified?.[column]) {
+      console.log(`User classified ${column} as:`, data.dataClassification.userClassified[column]);
       return data.dataClassification.userClassified[column];
     }
-    // Then check automatic classifications
-    if (data.validationResults?.columnAnalysis?.[column]) {
-      return data.validationResults.columnAnalysis[column].type;
+
+    // Then check auto classifications
+    if (data.dataClassification?.autoClassified?.[column]) {
+      console.log(`Auto classified ${column} as:`, data.dataClassification.autoClassified[column]);
+      return data.dataClassification.autoClassified[column];
     }
-    return null;
+
+    // Check the raw data
+    if (data.rawData && data.rawData.length > 0) {
+      const sampleValues = data.rawData
+        .slice(0, 100) // Take larger sample
+        .map(row => row[column])
+        .filter(value => value !== null && value !== undefined && value !== ''); // Remove empty values
+
+      if (sampleValues.length === 0) {
+        console.log(`No valid sample values found for ${column}`);
+        return 'categorical'; // Default to categorical if no valid samples
+      }
+
+      const uniqueValues = new Set(sampleValues.map(String));
+      console.log(`${column} has ${uniqueValues.size} unique values in sample`);
+
+      // Check if all values are numeric
+      const numericValues = sampleValues.filter(value => {
+        const cleaned = String(value).replace(/[,$%]/g, '').trim();
+        const num = parseFloat(cleaned);
+        return !isNaN(num) && isFinite(num);
+      });
+
+      const numericRatio = numericValues.length / sampleValues.length;
+      console.log(`${column} numeric ratio: ${numericRatio}`);
+
+      if (numericRatio > 0.9) { // 90% of values are numeric
+        console.log(`${column} classified as numeric`);
+        return 'numeric';
+      }
+
+      // Check if binary
+      if (uniqueValues.size <= 2) {
+        console.log(`${column} classified as binary`);
+        return 'binary';
+      }
+
+      // If few unique values relative to sample size, likely categorical
+      if (uniqueValues.size <= Math.min(10, sampleValues.length * 0.2)) {
+        console.log(`${column} classified as categorical (few unique values)`);
+        return 'categorical';
+      }
+
+      console.log(`${column} defaulting to categorical`);
+      return 'categorical';
+    }
+
+    console.log(`No data available for ${column}, defaulting to categorical`);
+    return 'categorical';
   };
 
-  // Get columns by type
+  // Update getColumnsByType function
   const getColumnsByType = (type) => {
     if (!data.columns) return [];
-    
-    return data.columns.filter(column => {
-      // Exclude target, date and grouping columns
-      if (column === data.selectedColumns?.target) return false;
-      if (column === data.selectedColumns?.date) return false;
-      if (data.selectedColumns?.grouping?.includes(column)) return false;
-      
-      // Check column type
+
+    const excludedColumns = [
+      data.selectedColumns?.target,
+      data.selectedColumns?.date,
+      ...(data.selectedColumns?.level || []),
+      ...(data.selectedColumns?.grouping || [])
+    ].filter(Boolean);
+
+    const result = data.columns.filter(column => {
+      if (excludedColumns.includes(column)) {
+        console.log(`Excluding column ${column} as it's a special column`);
+        return false;
+      }
+
       const effectiveType = getEffectiveColumnType(column);
+      console.log(`Column ${column} effective type:`, effectiveType);
       return effectiveType === type;
     });
+
+    console.log(`Columns of type ${type}:`, result);
+    return result;
   };
 
-  // Initialize aggregation rules
+  // Update useEffect for aggregation rules
   useEffect(() => {
     if (data.columns && Object.keys(aggregationRules).length === 0) {
+      console.log('Initializing aggregation rules');
       const defaultRules = {};
+      
       data.columns.forEach(column => {
+        // Skip excluded columns
+        if (column === data.selectedColumns?.target ||
+            column === data.selectedColumns?.date ||
+            data.selectedColumns?.grouping?.includes(column)) {
+          console.log(`Skipping excluded column: ${column}`);
+          return;
+        }
+
         const type = getEffectiveColumnType(column);
-        
-        // Skip target, date and grouping columns
-        if (column === data.selectedColumns?.target) return;
-        if (column === data.selectedColumns?.date) return;
-        if (data.selectedColumns?.grouping?.includes(column)) return;
+        console.log(`Setting default aggregation for ${column} (${type})`);
 
         // Set default aggregation based on type
         if (type === 'numeric') {
@@ -83,6 +153,7 @@ export default function AggregationConfig({ data, onUpdate, onNext, onBack }) {
         }
       });
 
+      console.log('Default aggregation rules:', defaultRules);
       setAggregationRules(defaultRules);
       onUpdate({ aggregationRules: defaultRules });
     }
@@ -116,8 +187,65 @@ export default function AggregationConfig({ data, onUpdate, onNext, onBack }) {
     });
   }, [data]);
 
+  // Add useEffect for data validation
+  useEffect(() => {
+    console.log('AggregationConfig mounted with data:', {
+      hasRawData: !!data.rawData,
+      columns: data.columns,
+      dataClassification: data.dataClassification,
+      validationResults: data.validationResults,
+      selectedColumns: data.selectedColumns
+    });
+
+    // Force column type detection if missing
+    if (data.rawData && (!data.validationResults?.columnAnalysis || !data.dataClassification)) {
+      const columnTypes = {};
+      data.columns?.forEach(column => {
+        columnTypes[column] = getEffectiveColumnType(column);
+      });
+      console.log('Inferred column types:', columnTypes);
+      
+      // Update data classification if missing
+      if (!data.dataClassification) {
+        onUpdate({
+          dataClassification: {
+            userClassified: {},
+            autoClassified: columnTypes
+          }
+        });
+      }
+    }
+  }, [data]);
+
+  const getAggregationSummary = () => {
+    const impact = data.selectedColumns?.aggregationImpact;
+    if (!impact) return null;
+
+    return {
+      originalRows: impact.originalCount,
+      aggregatedRows: impact.aggregatedCount,
+      reductionPercent: impact.reductionPercent
+    };
+  };
+
+  const aggregationSummary = getAggregationSummary();
   return (
     <Box>
+      {aggregationSummary && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          <Typography variant="body2">
+            Your dataset contains:
+            <ul>
+              <li>{aggregationSummary.originalRows} total rows</li>
+              <li>Will be aggregated to {aggregationSummary.aggregatedRows} rows at {data.selectedColumns.frequency} level</li>
+              {aggregationSummary.reductionPercent > 0 && (
+                <li>Data will be reduced by {aggregationSummary.reductionPercent}%</li>
+              )}
+            </ul>
+          </Typography>
+        </Alert>
+      )}
+
       <Typography variant="h5" sx={{ mb: 3, fontWeight: 600 }}>
         Configure Data Aggregation
       </Typography>

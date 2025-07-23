@@ -65,6 +65,230 @@ import {
   downloadJSON
 } from '../../utils/dataProcessor';
 
+// Flexible date parser function
+const parseFlexibleDate = (dateStr) => {
+  if (!dateStr) return null;
+
+  const str = dateStr.toString().trim();
+  let parsedDate = null;
+
+  // Try DD/MM/YYYY format first
+  const [day, month, year] = str.split(/[/-]/).map(n => parseInt(n, 10));
+  if (day && month && year) {
+    parsedDate = new Date(Date.UTC(year, month - 1, day));
+    if (!isNaN(parsedDate.getTime())) {
+      return parsedDate;
+    }
+  }
+
+  // Try ISO format (YYYY-MM-DD)
+  parsedDate = new Date(str);
+  if (!isNaN(parsedDate.getTime())) {
+    return new Date(Date.UTC(
+      parsedDate.getFullYear(),
+      parsedDate.getMonth(),
+      parsedDate.getDate()
+    ));
+  }
+
+  return null;
+};
+
+// Update the aggregateData function
+const aggregateData = (data, config) => {
+  const {
+    timestamp_column,
+    id_column,
+    time_granularity,
+    target_column,
+    selectedColumns
+  } = config;
+
+  // Get grouping columns from either grouping or level
+  const groupingColumns = selectedColumns?.level || [];
+  
+  console.log('Starting aggregation with:', {
+    groupingColumns,
+    config,
+    sampleRow: data[0],
+    totalRows: data.length
+  });
+
+  // Initialize aggregated data
+  const aggregated = {};
+  
+  // Get other columns (excluding date, target, and grouping columns)
+  const otherColumns = Object.keys(data[0]).filter(col => 
+    col !== timestamp_column && 
+    col !== target_column &&
+    !groupingColumns.includes(col)
+  );
+
+  // Track statistics
+  let processedRows = 0;
+  let skippedRows = 0;
+
+  data.forEach((row, index) => {
+    try {
+      const parsedDate = parseFlexibleDate(row[timestamp_column]);
+      if (!parsedDate) {
+        console.warn(`Invalid date at row ${index}:`, row[timestamp_column]);
+        skippedRows++;
+        return;
+      }
+
+      // Generate group key based on frequency
+      let groupKey;
+      switch(time_granularity.toUpperCase()) {
+        case 'W':
+          const dayOfWeek = parsedDate.getUTCDay();
+          const diff = parsedDate.getUTCDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+          const monday = new Date(Date.UTC(
+            parsedDate.getUTCFullYear(),
+            parsedDate.getUTCMonth(),
+            diff
+          ));
+          groupKey = monday.toISOString().split('T')[0];
+          break;
+
+        case 'M':
+          groupKey = `${parsedDate.getUTCFullYear()}-${String(parsedDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
+          break;
+
+        case 'Q':
+          const quarter = Math.floor(parsedDate.getUTCMonth() / 3);
+          groupKey = `${parsedDate.getUTCFullYear()}-${String(quarter * 3 + 1).padStart(2, '0')}-01`;
+          break;
+
+        case 'Y':
+          groupKey = `${parsedDate.getUTCFullYear()}-01-01`;
+          break;
+
+        default: // Daily
+          groupKey = new Date(Date.UTC(
+            parsedDate.getUTCFullYear(),
+            parsedDate.getUTCMonth(),
+            parsedDate.getUTCDate()
+          )).toISOString().split('T')[0];
+      }
+
+      // Create composite id from grouping columns
+      const itemId = groupingColumns.length > 0 
+        ? groupingColumns
+            .map(col => {
+              const value = row[col];
+              return value !== null && value !== undefined ? String(value).trim() : '';
+            })
+            .filter(Boolean)
+            .join('_')
+        : 'overall';
+
+      // Debug log for grouping
+      if (index === 0) {
+        console.log('First row grouping values:', {
+          columns: groupingColumns,
+          values: groupingColumns.map(col => row[col]),
+          itemId
+        });
+      }
+
+      const key = `${itemId}_${groupKey}`;
+
+      // Initialize group if not exists
+      if (!aggregated[key]) {
+        aggregated[key] = {
+          item_id: itemId,
+          [timestamp_column]: groupKey,
+          // Keep original grouping column values
+          ...groupingColumns.reduce((acc, col) => ({
+            ...acc,
+            [col]: row[col]
+          }), {}),
+          [target_column]: 0,
+          count: 0,
+          ...otherColumns.reduce((acc, col) => ({
+            ...acc,
+            [col]: {
+              sum: 0,
+              values: [],
+              numeric: true
+            }
+          }), {})
+        };
+      }
+
+      // Aggregate target value
+      const targetValue = parseFloat(String(row[target_column]).replace(/[,$]/g, ''));
+      if (!isNaN(targetValue)) {
+        aggregated[key][target_column] += targetValue;
+        aggregated[key].count++;
+      }
+
+      // Aggregate other columns
+      otherColumns.forEach(col => {
+        const value = row[col];
+        if (value !== undefined && value !== null) {
+          const numValue = parseFloat(String(value).replace(/[,$]/g, ''));
+          if (!isNaN(numValue)) {
+            aggregated[key][col].sum += numValue;
+            aggregated[key][col].values.push(numValue);
+          } else {
+            aggregated[key][col].numeric = false;
+            aggregated[key][col].values.push(value);
+          }
+        }
+      });
+
+      processedRows++;
+    } catch (error) {
+      console.warn(`Error processing row ${index}:`, error, row);
+      skippedRows++;
+    }
+  });
+
+  console.log('Aggregation stats:', {
+    processedRows,
+    skippedRows,
+    uniqueGroups: Object.keys(aggregated).length
+  });
+
+  // Convert to array and sort
+  return Object.values(aggregated)
+    .map(group => ({
+      item_id: group.item_id,
+      [timestamp_column]: group[timestamp_column],
+      // Include grouping columns
+      ...groupingColumns.reduce((acc, col) => ({
+        ...acc,
+        [col]: group[col]
+      }), {}),
+      [target_column]: group.count > 0 ? group[target_column] / group.count : 0,
+      ...otherColumns.reduce((acc, col) => ({
+        ...acc,
+        [col]: group[col].numeric 
+          ? (group[col].values.length > 0 ? group[col].sum / group[col].values.length : 0)
+          : (group[col].values.length > 0 ? findMode(group[col].values) : null)
+      }), {})
+    }))
+    .sort((a, b) => 
+      a[timestamp_column].localeCompare(b[timestamp_column]) || 
+      a.item_id.localeCompare(b.item_id)
+    );
+};
+
+// Add findMode helper function if not already present
+const findMode = (arr) => {
+  if (!arr.length) return null;
+  
+  const counts = arr.reduce((acc, val) => {
+    acc[val] = (acc[val] || 0) + 1;
+    return acc;
+  }, {});
+
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])[0][0];
+};
+
 export default function TrainingConfiguration({ data, onUpdate, onNext, onBack, setError, setLoading }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processedData, setProcessedData] = useState(null);
@@ -101,13 +325,36 @@ export default function TrainingConfiguration({ data, onUpdate, onNext, onBack, 
       setProcessingStep(1);
       await new Promise(resolve => setTimeout(resolve, 800));
 
-      // Step 2: Processing data
+      // Step 2: Processing data with aggregation
       setProcessingStep(2);
-      console.log('🔄 Processing data for training...');
+      console.log('🔄 Processing and aggregating data...');
       
+      const aggregationConfig = {
+        timestamp_column: data.selectedColumns.date,
+        id_column: 'item_id',
+        time_granularity: data.selectedColumns.frequency?.toUpperCase() || 'D',
+        target_column: data.selectedColumns.target,
+        selectedColumns: {
+          ...data.selectedColumns,
+          // Use grouping columns if available, fallback to level
+          level: data.grouping || data.selectedColumns?.level || []
+        }
+      };
+
+      console.log('Starting aggregation with config:', aggregationConfig);
+      
+      // Aggregate the data first
+      const aggregatedData = aggregateData(data.rawData, aggregationConfig);
+
+      console.log('Data aggregated:', {
+        beforeRows: data.rawData.length,
+        afterRows: aggregatedData.length
+      });
+
+      // Then process for training
       const processed = processDataForTraining(
-        data.rawData, 
-        data.featureClassification, 
+        aggregatedData,
+        data.featureClassification,
         data.selectedColumns
       );
 
@@ -120,7 +367,10 @@ export default function TrainingConfiguration({ data, onUpdate, onNext, onBack, 
       const jsonFileName = csvFileName.replace('.csv', '_config.json');
 
       console.log('🔄 Generating config file...');
-      const config = generateConfigFile(data, csvFileName);
+      const config = generateConfigFile({
+        ...data,
+        rawData: aggregatedData // Use aggregated data for config generation
+      }, csvFileName);
 
       await new Promise(resolve => setTimeout(resolve, 500));
 

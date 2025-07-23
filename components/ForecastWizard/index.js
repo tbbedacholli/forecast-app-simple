@@ -22,12 +22,14 @@ import AggregationConfig from "./AggregationConfig";
 import FeatureClassification from "./FeatureClassification";
 import TrainingConfiguration from "./TrainingConfiguration";
 import ModelTraining from "./ModelTraining";
+import ValidationStep from "./ValidationStep";
 
 // Wizard Steps Configuration
 const steps = [
   "Upload Data",
   "Data Classification",
   "Select Columns",
+  "Data Validation",      // Moved here
   "Configure Aggregation",
   "Feature Classification",
   "Training Configuration",
@@ -101,7 +103,7 @@ export default function ForecastWizard() {
       onUpdate: updateWizardData,
       onNext: handleNext,
       onBack: handleBack,
-      setError, // Add this
+      setError,
     };
 
     switch (step) {
@@ -112,12 +114,14 @@ export default function ForecastWizard() {
       case 2:
         return <ColumnSelection {...commonProps} />;
       case 3:
-        return <AggregationConfig {...commonProps} />;
+        return <ValidationStep {...commonProps} />; // Moved here
       case 4:
-        return <FeatureClassification {...commonProps} />;
+        return <AggregationConfig {...commonProps} />;
       case 5:
-        return <TrainingConfiguration {...commonProps} />;
+        return <FeatureClassification {...commonProps} />;
       case 6:
+        return <TrainingConfiguration {...commonProps} />;
+      case 7:
         return (
           <ModelTraining
             {...commonProps}

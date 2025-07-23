@@ -26,7 +26,11 @@ import {
   AccordionDetails,
   Tooltip,
 } from "@mui/material";
-import { verifyDateAndGroupingUniqueness, analyzeAggregationImpact } from '../../utils/dataVerification';
+import {
+  verifyDateAndGroupingUniqueness,
+  analyzeAggregationImpact,
+} from "../../utils/dataVerification";
+import { parseFlexibleDate, formatDateForDisplay } from '../../utils/dateUtils';
 
 // Individual icon imports
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -72,7 +76,13 @@ const VALID_AGGREGATIONS = {
   Y: ["Y"],
 };
 
-export default function ColumnSelection({ data, onUpdate, onNext, onBack, setError }) {
+export default function ColumnSelection({
+  data,
+  onUpdate,
+  onNext,
+  onBack,
+  setError,
+}) {
   console.log("ColumnSelection component received data:", data); // Add this line
 
   const [selectedColumns, setSelectedColumns] = useState({
@@ -217,8 +227,8 @@ export default function ColumnSelection({ data, onUpdate, onNext, onBack, setErr
   };
 
   // Update the handleNext function
+  // Update the handleNext function
   const handleNext = () => {
-    // Show all validation errors when user tries to proceed
     const allErrors = [];
 
     if (!selectedColumns.target) {
@@ -237,33 +247,60 @@ export default function ColumnSelection({ data, onUpdate, onNext, onBack, setErr
       allErrors.push("Forecast horizon must be at least 1 period");
     }
 
-    // Only show validation errors when trying to proceed
+    // Calculate aggregation impact with proper date handling
+    if (selectedColumns.frequency && dateGranularity) {
+      const uniqueDates = new Set();
+      const failedDates = new Set();
+
+      data.rawData.forEach((row) => {
+        try {
+          const date = parseFlexibleDate(row[selectedColumns.date]);
+          if (!date) {
+            console.warn("Could not parse date:", row[selectedColumns.date]);
+            failedDates.add(row[selectedColumns.date]);
+            return;
+          }
+
+          // For weekly aggregation, convert to week start date
+          if (selectedColumns.frequency === "W") {
+            const dayOfWeek = date.getDay();
+            date.setDate(date.getDate() - dayOfWeek);
+          }
+
+          uniqueDates.add(formatDateForDisplay(date));
+        } catch (error) {
+          console.error("Error processing date:", error);
+          failedDates.add(row[selectedColumns.date]);
+        }
+      });
+
+      // Log failed dates for debugging
+      if (failedDates.size > 0) {
+        console.warn('Failed to parse dates:', Array.from(failedDates));
+      }
+
+      // Calculate impact
+      const impact = {
+        originalCount: data.rawData.length,
+        aggregatedCount: uniqueDates.size,
+        reductionPercent: (
+          ((data.rawData.length - uniqueDates.size) / data.rawData.length) *
+          100
+        ).toFixed(1),
+      };
+
+      console.log("Aggregation impact:", impact);
+
+      onUpdate({
+        ...selectedColumns,
+        aggregationImpact: impact,
+      });
+    }
+
     if (allErrors.length > 0) {
       setValidationErrors(allErrors);
       return;
     }
-
-    // Verify data structure and calculate aggregation impact
-    const { isUnique, duplicates } = verifyDateAndGroupingUniqueness(
-      data.rawData,
-      selectedColumns.date,
-      selectedColumns.grouping
-    );
-
-    const impact = analyzeAggregationImpact(
-      data.rawData,
-      selectedColumns.date,
-      selectedColumns.grouping
-    );
-
-    // Update wizard data with verification results without showing error
-    onUpdate({
-      selectedColumns,
-      verificationResults: {
-        uniquenessCheck: { isUnique, duplicates },
-        aggregationImpact: impact
-      }
-    });
 
     onNext();
   };
@@ -317,84 +354,80 @@ export default function ColumnSelection({ data, onUpdate, onNext, onBack, setErr
   };
 
   // Add these helper functions
-  const detectDateGranularity = (dates) => {
-    if (!dates || dates.length < 2) return null;
-
-    // Parse dates and sort them
-    const sortedDates = dates
-      .map((d) => {
-        // Try different date formats
-        const parsed = new Date(d);
-        if (!isNaN(parsed.getTime())) return parsed;
-
-        // Try DD/MM/YYYY format
-        const [day, month, year] = d.split("/").map(Number);
-        return new Date(year, month - 1, day);
-      })
-      .filter((d) => !isNaN(d.getTime())) // Remove invalid dates
+  const detectDateGranularity = (dateValues) => {
+    // Convert strings to Date objects
+    const dates = dateValues
+      .map((str) => new Date(str))
+      .filter((d) => !isNaN(d.getTime()))
       .sort((a, b) => a - b);
 
-    if (sortedDates.length < 2) return null;
+    if (dates.length < 2) return null;
 
     // Calculate intervals between consecutive dates
     const intervals = [];
-    for (let i = 1; i < Math.min(sortedDates.length, 100); i++) {
-      const date1 = sortedDates[i - 1];
-      const date2 = sortedDates[i];
-
+    for (let i = 1; i < dates.length; i++) {
       intervals.push({
-        days: differenceInDays(date2, date1),
+        days: Math.round((dates[i] - dates[i - 1]) / (1000 * 60 * 60 * 24)),
         monthsDiff:
-          (date2.getFullYear() - date1.getFullYear()) * 12 +
-          (date2.getMonth() - date1.getMonth()),
-        date1,
-        date2,
+          (dates[i].getFullYear() - dates[i - 1].getFullYear()) * 12 +
+          (dates[i].getMonth() - dates[i - 1].getMonth()),
+        date1: dates[i - 1],
+        date2: dates[i],
       });
     }
 
     // Check patterns starting from smallest to largest granularity
-    const isHourly = intervals.every((i) => i.days === 0);
-    if (isHourly) return "H";
-
     const isDaily = intervals.every((i) => i.days === 1);
     if (isDaily) return "D";
 
     const isWeekly = intervals.every((i) => i.days >= 6 && i.days <= 8);
     if (isWeekly) return "W";
 
-    // Monthly check: consecutive months and same/close day of month
     const isMonthly = intervals.every((i) => {
       return (
         i.monthsDiff === 1 &&
         Math.abs(i.date1.getDate() - i.date2.getDate()) <= 3
-      ); // Allow 3 days variance
+      );
     });
     if (isMonthly) return "M";
 
-    // Quarterly check
-    const isQuarterly = intervals.every((i) => i.monthsDiff === 3);
-    if (isQuarterly) return "Q";
-
-    // Yearly check
-    const isYearly = intervals.every((i) => i.monthsDiff === 12);
-    if (isYearly) return "Y";
-
     // If no clear pattern is found, use the most common interval
-    const mostCommonDays = Object.entries(
-      intervals.reduce((acc, i) => {
-        acc[i.days] = (acc[i.days] || 0) + 1;
-        return acc;
-      }, {})
-    ).sort((a, b) => b[1] - a[1])[0];
+    const mostCommonInterval = getMostCommonInterval(intervals);
+    return mostCommonInterval;
+  };
 
-    // Determine granularity based on most common interval
-    const days = parseInt(mostCommonDays[0]);
-    if (days === 0) return "H";
-    if (days === 1) return "D";
-    if (days >= 6 && days <= 8) return "W";
-    if (days >= 28 && days <= 31) return "M";
-    if (days >= 89 && days <= 92) return "Q";
-    return "Y";
+  const getMostCommonInterval = (intervals) => {
+    // Count frequency of each interval
+    const frequencyMap = intervals.reduce((acc, interval) => {
+      // For daily intervals
+      if (interval.days === 1) {
+        acc.D = (acc.D || 0) + 1;
+      }
+      // For weekly intervals (6-8 days)
+      else if (interval.days >= 6 && interval.days <= 8) {
+        acc.W = (acc.W || 0) + 1;
+      }
+      // For monthly intervals
+      else if (interval.monthsDiff === 1) {
+        acc.M = (acc.M || 0) + 1;
+      }
+      // For quarterly intervals
+      else if (interval.monthsDiff === 3) {
+        acc.Q = (acc.Q || 0) + 1;
+      }
+      // For yearly intervals
+      else if (interval.monthsDiff === 12) {
+        acc.Y = (acc.Y || 0) + 1;
+      }
+      return acc;
+    }, {});
+
+    // Find the most common interval
+    const mostCommon = Object.entries(frequencyMap).sort(
+      (a, b) => b[1] - a[1]
+    )[0];
+
+    return mostCommon ? mostCommon[0] : "D"; // Default to daily if no pattern found
   };
 
   const isAggregationNeeded = () => {
