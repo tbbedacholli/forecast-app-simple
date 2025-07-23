@@ -316,21 +316,54 @@ export default function ValidationStep({ data, onUpdate, onNext, onBack }) {
 
       console.log('Validation config:', validationConfig);
 
-      // Format the data for validation
+      // Format the data for validation but reduce payload size
       const formattedData = data.rawData
         .map((row, index) => {
           try {
+            // Parse date
             const parsedDate = parseFlexibleDate(row[data.selectedColumns.date]);
             if (!parsedDate) {
               console.warn(`Invalid date at row ${index}:`, row[data.selectedColumns.date]);
               return null;
             }
-            return {
-              ...row,
-              [data.selectedColumns.date]: formatDateForDisplay(parsedDate)
+
+            // Base object with required fields
+            const formattedRow = {
+              [data.selectedColumns.date]: formatDateForDisplay(parsedDate),
+              [data.selectedColumns.target]: row[data.selectedColumns.target]
             };
+
+            // Only validate existence of required fields, not their values
+            if (!row.hasOwnProperty(data.selectedColumns.date)) {
+              console.warn(`Missing date column at row ${index}`);
+              return null;
+            }
+            if (!row.hasOwnProperty(data.selectedColumns.target)) {
+              console.warn(`Missing target column at row ${index}`);
+              return null;
+            }
+
+            // Add any grouping columns if they exist
+            if (data.grouping && data.grouping.length > 0) {
+              data.grouping.forEach(col => {
+                // Add the column value even if it's 0, empty string, or null
+                formattedRow[col] = row[col];
+              });
+            }
+
+            // Debug first few rows
+            if (index < 5) {
+              console.log('Processing row:', {
+                index,
+                original: row,
+                formatted: formattedRow,
+                groupingColumns: data.grouping
+              });
+            }
+
+            return formattedRow;
           } catch (error) {
-            console.warn(`Error processing row ${index}:`, error);
+            console.warn(`Error processing row ${index}:`, error, row);
             return null;
           }
         })
@@ -340,28 +373,60 @@ export default function ValidationStep({ data, onUpdate, onNext, onBack }) {
         throw new Error('No valid data rows after date parsing');
       }
 
-      // Make validation request
-      const response = await fetch('/api/validate/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          data: formattedData, 
-          config: validationConfig 
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
+      // Calculate chunk size (approximately 1MB of data)
+      const CHUNK_SIZE = 5000;
+      const chunks = [];
+      
+      // Split data into chunks
+      for (let i = 0; i < formattedData.length; i += CHUNK_SIZE) {
+        chunks.push(formattedData.slice(i, i + CHUNK_SIZE));
       }
 
-      const results = await response.json();
-      console.log('Validation results:', results);
+      console.log(`Split data into ${chunks.length} chunks`);
 
-      if (!results.success) {
-        throw new Error(results.error || 'Validation failed');
+      // Process each chunk
+      let combinedResults = null;
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        console.log(`Processing chunk ${i + 1}/${chunks.length}, size: ${chunk.length} rows`);
+
+        const response = await fetch('/api/validate/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            data: chunk, 
+            config: validationConfig,
+            isChunked: true,
+            chunkIndex: i,
+            totalChunks: chunks.length
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+
+        const chunkResults = await response.json();
+        
+        if (!chunkResults.success) {
+          throw new Error(chunkResults.error || 'Validation failed');
+        }
+
+        // Combine results
+        if (!combinedResults) {
+          combinedResults = chunkResults;
+        } else {
+          // Merge results logically
+          combinedResults.totalSeries += chunkResults.totalSeries;
+          combinedResults.category1Count += chunkResults.category1Count;
+          combinedResults.category2Count += chunkResults.category2Count;
+          combinedResults.category3Count += chunkResults.category3Count;
+          combinedResults.seriesAnalysis.push(...chunkResults.seriesAnalysis);
+        }
       }
 
-      setValidationResults(results);
+      console.log('Combined validation results:', combinedResults);
+      setValidationResults(combinedResults);
       setError(null);
 
     } catch (error) {

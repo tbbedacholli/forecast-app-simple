@@ -12,10 +12,12 @@ const nextConfig = {
   },
   api: {
     bodyParser: {
-      sizeLimit: '100mb',
+      sizeLimit: '50mb',
     },
-    responseLimit: '100mb',
-  }
+    responseLimit: false,
+  },
+  // ... other Next.js config options
 }
 
+// Replace module.exports with export default
 export default nextConfig;

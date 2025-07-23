@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server';
 
+// Add size limit configuration for Next.js API route
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb' // Increase size limit to 50MB
+    },
+    responseLimit: false // Remove response size limit
+  }
+};
+
 export async function POST(request) {
   try {
     // Parse the JSON body
