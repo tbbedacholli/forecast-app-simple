@@ -1,27 +1,21 @@
 // app/api/wizard/upload/route.js
 import { NextResponse } from 'next/server';
+import { S3Client } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import Papa from 'papaparse';
 
-// Import with error handling
-let uploadToS3;
-try {
-  const s3Module = await import('../../../../utils/s3Storage');
-  uploadToS3 = s3Module.uploadToS3;
-} catch (error) {
-  console.error('Failed to import S3 storage:', error);
-  uploadToS3 = null;
-}
+// Configure S3 client with MY_ prefixed environment variables
+const s3Client = new S3Client({
+  region: process.env.MY_REGION,
+  credentials: {
+    accessKeyId: process.env.MY_ACCESS_KEY_ID,
+    secretAccessKey: process.env.MY_SECRET_ACCESS_KEY
+  }
+});
 
 function generateFilePath(prefix, filename) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   return `${prefix}/${timestamp}-${filename}`;
-}
-
-async function uploadFileToS3(buffer, key, contentType, metadata = {}) {
-  if (!uploadToS3) {
-    throw new Error('S3 upload functionality not available');
-  }
-  return await uploadToS3(key, buffer, contentType);
 }
 
 export async function POST(request) {
@@ -88,25 +82,44 @@ export async function POST(request) {
       file.name
     );
 
-    // Try to upload to S3
-    let s3Info = null;
-    try {
-      if (uploadToS3) {
-        console.log(`📤 Uploading to S3 path: ${s3Path}`);
-        const uploadResult = await uploadFileToS3(Buffer.from(bytes), s3Path, 'text/csv');
+    // Use multipart upload for large files
+    const upload = new Upload({
+      client: s3Client,
+      params: {
+        Bucket: process.env.MY_S3_BUCKET_NAME,
+        Key: s3Path,
+        Body: Buffer.from(bytes),
+        ContentType: file.type,
+      },
+      queueSize: 4, // number of concurrent uploads
+      partSize: 5 * 1024 * 1024, // 5MB part size
+      leavePartsOnError: false
+    });
+
+    // Add event listeners for better monitoring
+    upload.on('httpUploadProgress', (progress) => {
+      console.log(`Upload progress: ${progress.loaded}/${progress.total}`);
+    });
+
+    // Perform upload with retry logic
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries) {
+      try {
+        await upload.done();
+        break;
+      } catch (error) {
+        retryCount++;
+        console.error(`Upload attempt ${retryCount} failed:`, error);
         
-        if (uploadResult.success) {
-          console.log(`✅ File uploaded to S3: ${uploadResult.key}`);
-          s3Info = {
-            bucket: process.env.AWS_S3_BUCKET_NAME,
-            key: uploadResult.key,
-            url: uploadResult.url
-          };
+        if (retryCount === maxRetries) {
+          throw error;
         }
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, retryCount * 2000));
       }
-    } catch (s3Error) {
-      console.warn('⚠️ S3 upload failed:', s3Error.message);
-      throw s3Error; // Rethrow to handle in the main try-catch
     }
 
     const columns = Object.keys(rows[0]);
@@ -119,7 +132,10 @@ export async function POST(request) {
       totalRows: rows.length,
       fileSize: file.size,
       fileName: file.name,
-      s3Info: s3Info
+      s3Info: {
+        key: s3Path,
+        url: `https://${process.env.MY_S3_BUCKET_NAME}.s3.${process.env.MY_REGION}.amazonaws.com/${s3Path}`
+      }
     });
 
   } catch (error) {
@@ -134,3 +150,10 @@ export async function POST(request) {
 export async function GET() {
   return NextResponse.json({ message: 'Upload endpoint ready' });
 }
+
+export const config = {
+  api: {
+    bodyParser: false,
+    responseLimit: false,
+  },
+};

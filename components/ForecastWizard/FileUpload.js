@@ -787,12 +787,21 @@ const isBinaryColumn = (values) => {
   return isBinary;
 };
 
-// Replace the isCategoricalNumeric function with this improved version:
+// Update the isCategoricalNumeric function with iterative approach
 const isCategoricalNumeric = (values) => {
-  if (values.length === 0) return false;
+  if (!values || values.length === 0) return false;
   
-  const numericValues = values.map(val => {
-    if (val === null || val === undefined || val === '') return NaN;
+  // Take a sample of values to prevent stack overflow
+  const sampleSize = 1000;
+  const sample = values.length > sampleSize ? 
+    values.slice(0, sampleSize) : 
+    values;
+
+  // Process values iteratively instead of using map
+  const numericValues = [];
+  for (let i = 0; i < sample.length; i++) {
+    const val = sample[i];
+    if (val === null || val === undefined || val === '') continue;
     
     let str = String(val).trim();
     str = str.replace(/^["']|["']$/g, '');
@@ -806,11 +815,15 @@ const isCategoricalNumeric = (values) => {
       str = str.slice(0, -1);
     }
     
-    return parseFloat(str);
-  }).filter(val => !isNaN(val));
+    const num = parseFloat(str);
+    if (!isNaN(num)) {
+      numericValues.push(num);
+    }
+  }
   
   if (numericValues.length === 0) return false;
   
+  // Use Set for unique values to improve performance
   const uniqueValues = new Set(numericValues);
   const min = Math.min(...numericValues);
   const max = Math.max(...numericValues);
@@ -819,55 +832,12 @@ const isCategoricalNumeric = (values) => {
   const allIntegers = numericValues.every(val => Number.isInteger(val));
   const cardinality = uniqueValues.size;
   
-  // **ENHANCED: More specific rules to avoid misclassifying count data**
+  // Simplified categorical checks
+  const isSmallRange = range <= 50;
+  const isLowCardinality = cardinality <= 20;
+  const hasReasonableValues = min >= 0 && max <= 100;
   
-  // 1. Clearly categorical patterns (small, bounded sets)
-  const isSequentialSmall = allIntegers && min >= 0 && max <= 20 && cardinality <= 15;
-  const isRatingScale = allIntegers && min >= 1 && max <= 10 && cardinality <= 10;
-  const isDayOfWeek = allIntegers && min >= 0 && max <= 6 && cardinality <= 7;
-  const isMonth = allIntegers && min >= 1 && max <= 12 && cardinality <= 12;
-  const isHour = allIntegers && min >= 0 && max <= 23 && cardinality <= 24;
-  const isSeason = allIntegers && min >= 1 && max <= 4 && cardinality <= 4;
-  
-  // 2. **FIXED: Don't use low cardinality ratio for large numbers**
-  // Only apply low cardinality rule for small values (not count data)
-  const cardinalityRatio = cardinality / numericValues.length;
-  const isSmallValueSet = max <= 50; // Only for small values
-  const isVeryLowCardinality = cardinalityRatio < 0.05 && isSmallValueSet; // Very restrictive
-  
-  // 3. **NEW: Exclude obvious count/measurement data**
-  const isLikelyCountData = max > 20 && range > 10; // Count data usually has variety
-  const isLikelyMeasurement = !Number.isInteger(min) || !Number.isInteger(max); // Has decimals
-  
-  const isCategorical = allIntegers && !isLikelyCountData && !isLikelyMeasurement && (
-    isSequentialSmall ||
-    isRatingScale ||
-    isDayOfWeek ||
-    isMonth ||
-    isHour ||
-    isSeason ||
-    isVeryLowCardinality
-  );
-  
-  console.log(`🔍 Categorical numeric check for ${uniqueValues.size} unique values:`, {
-    values: [...uniqueValues].sort((a,b) => a-b).slice(0, 10),
-    min, max, range,
-    allIntegers,
-    cardinality,
-    cardinalityRatio: cardinalityRatio.toFixed(3),
-    isSequentialSmall,
-    isRatingScale,
-    isDayOfWeek,
-    isMonth,
-    isHour,
-    isSeason,
-    isLikelyCountData,
-    isLikelyMeasurement,
-    isVeryLowCardinality,
-    isCategorical
-  });
-  
-  return isCategorical;
+  return allIntegers && isSmallRange && isLowCardinality && hasReasonableValues;
 };
 
 // **Enhanced categorical detection**
@@ -1062,10 +1032,16 @@ const validateFileStructureImproved = (data) => {
     results.warnings.push(`Only ${data.length} rows detected. Consider having more data for better forecasting.`);
   }
 
-  // Analyze each column
+  // Take a sample for large files
+  const sampleSize = 1000;
+  const dataSample = data.length > sampleSize ? 
+    data.slice(0, sampleSize) : 
+    data;
+
+  // Analyze each column using the sample
   const columns = Object.keys(data[0]);
   columns.forEach(column => {
-    const columnData = data.map(row => row[column]);
+    const columnData = dataSample.map(row => row[column]);
     results.columnAnalysis[column] = analyzeColumnImproved(column, columnData);
   });
 
