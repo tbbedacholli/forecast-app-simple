@@ -1,41 +1,49 @@
 import { NextResponse } from 'next/server';
 
-// Add size limit configuration for Next.js API route
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '50mb' // Increase size limit to 50MB
-    },
-    responseLimit: false // Remove response size limit
-  }
-};
-
+// Update the config to use the new App Router syntax
 export async function POST(request) {
+  const maxBodySize = '50mb';
+  // Set response headers for larger payload
+  const headers = {
+    'Transfer-Encoding': 'chunked',
+    'Content-Type': 'application/json',
+  };
+
   try {
-    // Parse the JSON body
-    const { data, config } = await request.json();
+    // Parse the JSON body with size limit
+    const body = await request.json();
+    const { data, config } = body;
 
     if (!data || !config) {
       return NextResponse.json(
         { error: 'Missing data or configuration' },
-        { status: 400 }
+        { 
+          status: 400,
+          headers
+        }
       );
     }
 
-    // Process data directly without saving to file
+    // Process data
     const validationProcess = await import('./validationProcess');
     const results = await validationProcess.default(data, config);
 
     return NextResponse.json({
       success: true,
       ...results
-    });
+    }, { headers });
 
   } catch (error) {
     console.error('Validation error:', error);
     return NextResponse.json(
       { error: `Validation failed: ${error.message}` },
-      { status: 500 }
+      { 
+        status: 500,
+        headers
+      }
     );
   }
 }
+
+// Remove the old config export
+// export const config = { ... }

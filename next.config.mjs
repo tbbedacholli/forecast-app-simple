@@ -6,18 +6,23 @@ const nextConfig = {
       bodySizeLimit: '100mb'
     }
   },
-  // Add file upload limits
   serverRuntimeConfig: {
     maxFileSize: 100 * 1024 * 1024, // 100MB in bytes
   },
-  api: {
-    bodyParser: {
-      sizeLimit: '50mb',
-    },
-    responseLimit: false,
+  // Update api config for App Router
+  async headers() {
+    return [
+      {
+        source: '/api/:path*',
+        headers: [
+          {
+            key: 'Transfer-Encoding',
+            value: 'chunked',
+          },
+        ],
+      },
+    ];
   },
-  // ... other Next.js config options
 }
 
-// Replace module.exports with export default
 export default nextConfig;
