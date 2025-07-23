@@ -21,6 +21,10 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
 import ErrorIcon from '@mui/icons-material/Error';
 import { parse, format as formatDate } from 'date-fns';
+import { parseISO } from 'date-fns/parseISO';
+import { differenceInSeconds } from 'date-fns/differenceInSeconds';
+import { differenceInDays } from 'date-fns/differenceInDays';
+import { format } from 'date-fns/format';
 import { parseFlexibleDate, formatDateForDisplay } from '../../utils/dateUtils';
 import { isDateColumn, isNumericColumn } from '../../utils/columnUtils';
 
