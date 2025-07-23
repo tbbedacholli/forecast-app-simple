@@ -18,7 +18,22 @@ function generateFilePath(prefix, filename) {
   return `${prefix}/${timestamp}-${filename}`;
 }
 
+// Remove the old config export
+// export const config = { ... }
+
+// Add the new route segment config
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // 5 minutes timeout
+
+// Add size limit through headers
 export async function POST(request) {
+  // Set headers for large file handling
+  const headers = {
+    'Transfer-Encoding': 'chunked',
+    'Content-Type': 'application/json',
+  };
+
   try {
     console.log('🔄 Upload API called');
     
@@ -136,24 +151,20 @@ export async function POST(request) {
         key: s3Path,
         url: `https://${process.env.MY_S3_BUCKET_NAME}.s3.${process.env.MY_REGION}.amazonaws.com/${s3Path}`
       }
-    });
+    }, { headers });
 
   } catch (error) {
     console.error('❌ Upload API error:', error);
-    return NextResponse.json(
-      { error: `Upload failed: ${error.message}` },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      error: 'Upload failed',
+      details: error.message
+    }, { 
+      status: 500,
+      headers 
+    });
   }
 }
 
 export async function GET() {
   return NextResponse.json({ message: 'Upload endpoint ready' });
 }
-
-export const config = {
-  api: {
-    bodyParser: false,
-    responseLimit: false,
-  },
-};
